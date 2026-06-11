@@ -46,9 +46,10 @@ export const ReviewList = ({ onNavigate, currentPath }: ReviewListProps) => {
   const [reviewAction, setReviewAction] = useState<'approve' | 'reject'>('approve');
 
   const pendingAnnotations = annotations.filter(a => a.status === 'submitted');
-  const reviewedAnnotations = annotations.filter(a => a.status === 'reviewed' || a.status === 'rejected');
+  const reviewedAnnotations = annotations.filter(a => a.status === 'reviewed');
+  const draftAnnotations = annotations.filter(a => a.status === 'draft');
 
-  const filteredAnnotations = [...pendingAnnotations, ...reviewedAnnotations].filter(annotation => {
+  const filteredAnnotations = [...pendingAnnotations, ...reviewedAnnotations, ...draftAnnotations].filter(annotation => {
     const image = images.find(i => i.id === annotation.imageId);
     const matchesSearch = image?.fileName.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesStatus = !selectedStatus || annotation.status === selectedStatus;
@@ -73,8 +74,9 @@ export const ReviewList = ({ onNavigate, currentPath }: ReviewListProps) => {
         annotationId: selectedAnnotation,
         reviewerId: user?.id || '',
         result: 'approved',
-        comments: reviewComment,
+        comments: reviewComment || '审核通过',
       });
+      alert('审核通过');
     }
     setShowDetailModal(false);
     setSelectedAnnotation(null);
@@ -84,6 +86,7 @@ export const ReviewList = ({ onNavigate, currentPath }: ReviewListProps) => {
   const handleReject = () => {
     if (selectedAnnotation && reviewComment) {
       rejectAnnotation(selectedAnnotation, reviewComment);
+      alert('已退回，标注员可以重新修改');
     }
     setShowDetailModal(false);
     setSelectedAnnotation(null);
@@ -243,10 +246,23 @@ export const ReviewList = ({ onNavigate, currentPath }: ReviewListProps) => {
                 筛选
                 <ChevronDown className={`w-4 h-4 transition-transform ${showFilters ? 'rotate-180' : ''}`} />
               </button>
+              {showFilters && (
+                <select
+                  value={selectedStatus}
+                  onChange={(e) => setSelectedStatus(e.target.value)}
+                  className="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+                >
+                  <option value="">全部状态</option>
+                  <option value="draft">草稿</option>
+                  <option value="submitted">待审核</option>
+                  <option value="reviewed">已通过</option>
+                </select>
+              )}
             </div>
             <div className="flex items-center gap-4 text-sm">
               <span className="text-gray-500">待审核: <span className="font-medium text-blue-600">{pendingAnnotations.length}</span></span>
-              <span className="text-gray-500">已审核: <span className="font-medium text-green-600">{reviewedAnnotations.length}</span></span>
+              <span className="text-gray-500">已通过: <span className="font-medium text-green-600">{reviewedAnnotations.length}</span></span>
+              <span className="text-gray-500">草稿: <span className="font-medium text-gray-600">{draftAnnotations.length}</span></span>
             </div>
           </div>
 
@@ -279,6 +295,9 @@ export const ReviewList = ({ onNavigate, currentPath }: ReviewListProps) => {
                     {review && (
                       <div className="text-xs text-gray-500 mb-3">
                         审核人: {reviewer?.name} | {review.createdAt}
+                        {review.comments && (
+                          <div className="mt-1">意见: {review.comments}</div>
+                        )}
                       </div>
                     )}
                     <div className="flex items-center justify-end gap-2">
@@ -354,9 +373,9 @@ export const ReviewList = ({ onNavigate, currentPath }: ReviewListProps) => {
               </p>
             </div>
             <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
-              <p className="text-sm text-gray-500 mb-1">审核退回</p>
-              <p className="text-2xl font-bold text-red-600">
-                {annotations.filter(a => a.status === 'rejected').length}
+              <p className="text-sm text-gray-500 mb-1">待审核</p>
+              <p className="text-2xl font-bold text-blue-600">
+                {annotations.filter(a => a.status === 'submitted').length}
               </p>
             </div>
           </div>
@@ -499,18 +518,18 @@ export const ReviewList = ({ onNavigate, currentPath }: ReviewListProps) => {
               <div className="text-center p-4 bg-green-50 rounded-lg">
                 <div className="text-3xl font-bold text-green-600">
                   {annotations.filter(a => a.status === 'reviewed').length > 0 
-                    ? Math.round((annotations.filter(a => a.status === 'reviewed').length / annotations.length) * 100) 
+                    ? Math.round((annotations.filter(a => a.status === 'reviewed').length / (annotations.length || 1)) * 100) 
                     : 0}%
                 </div>
-                <div className="text-sm text-gray-600 mt-1">准确率</div>
+                <div className="text-sm text-gray-600 mt-1">审核通过率</div>
               </div>
               <div className="text-center p-4 bg-blue-50 rounded-lg">
-                <div className="text-3xl font-bold text-blue-600">88%</div>
-                <div className="text-sm text-gray-600 mt-1">完整率</div>
+                <div className="text-3xl font-bold text-blue-600">{annotations.length}</div>
+                <div className="text-sm text-gray-600 mt-1">标注总数</div>
               </div>
               <div className="text-center p-4 bg-yellow-50 rounded-lg">
-                <div className="text-3xl font-bold text-yellow-600">{annotations.filter(a => a.status === 'rejected').length}</div>
-                <div className="text-sm text-gray-600 mt-1">问题数量</div>
+                <div className="text-3xl font-bold text-yellow-600">{pendingAnnotations.length}</div>
+                <div className="text-sm text-gray-600 mt-1">待审核数量</div>
               </div>
             </div>
           </div>
@@ -614,6 +633,18 @@ export const ReviewList = ({ onNavigate, currentPath }: ReviewListProps) => {
                     />
                   </div>
                 )}
+                {reviewAction === 'approve' && (
+                  <div className="space-y-3">
+                    <label className="block text-sm font-medium text-gray-700">审核意见（可选）</label>
+                    <textarea
+                      value={reviewComment}
+                      onChange={(e) => setReviewComment(e.target.value)}
+                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 resize-none"
+                      rows={3}
+                      placeholder="请输入审核意见"
+                    />
+                  </div>
+                )}
                 <div className="flex justify-end gap-3 mt-4">
                   <Button variant="secondary" onClick={() => {
                     setShowDetailModal(false);
@@ -651,7 +682,7 @@ export const ReviewList = ({ onNavigate, currentPath }: ReviewListProps) => {
                         ? 'bg-green-100 text-green-600' 
                         : 'bg-red-100 text-red-600'
                     }`}>
-                      {getStatusText(getAnnotation(selectedAnnotation)?.review?.result || '')}
+                      {getStatusText(getAnnotation(selectedAnnotation)?.review?.result === 'approved' ? 'reviewed' : 'rejected')}
                     </span>
                     <span className="text-sm text-gray-500">
                       {users.find(u => u.id === getAnnotation(selectedAnnotation)?.review?.reviewerId)?.name}

@@ -5,7 +5,8 @@ import {
   Edit, 
   Trash2,
   Mail,
-  User
+  User,
+  AlertTriangle
 } from 'lucide-react';
 import { Layout } from '../components/Layout/Layout';
 import { Button } from '../components/Common/Button';
@@ -19,12 +20,14 @@ interface MemberListProps {
 }
 
 export const MemberList = ({ onNavigate, currentPath }: MemberListProps) => {
-  const { users, tasks, annotations, addUser, updateUser, deleteUser, user, setUser } = useStore();
+  const { users, tasks, annotations, addUser, updateUser, deleteUser, user, setUser, reassignTasks } = useStore();
   const [searchTerm, setSearchTerm] = useState('');
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [showReassignModal, setShowReassignModal] = useState(false);
   const [selectedUser, setSelectedUser] = useState<string | null>(null);
+  const [newAssigneeId, setNewAssigneeId] = useState<string>('');
   const [formData, setFormData] = useState({
     name: '',
     email: '',
@@ -45,8 +48,13 @@ export const MemberList = ({ onNavigate, currentPath }: MemberListProps) => {
     return {
       totalTasks: userTasks.length,
       completedTasks: userTasks.filter(t => t.status === 'completed').length,
+      pendingTasks: userTasks.filter(t => t.status !== 'completed').length,
       totalAnnotations: userAnnotations.length,
     };
+  };
+
+  const getUncompletedTasks = (userId: string) => {
+    return tasks.filter(t => t.assigneeId === userId && t.status !== 'completed');
   };
 
   const handleCreate = () => {
@@ -55,12 +63,14 @@ export const MemberList = ({ onNavigate, currentPath }: MemberListProps) => {
       email: formData.email,
       role: formData.role,
     });
+    alert(`成员 ${formData.name} 添加成功！默认密码为: 123456`);
     setShowCreateModal(false);
     setFormData({ name: '', email: '', role: 'annotator' });
   };
 
   const handleEdit = () => {
     if (selectedUser) {
+      const oldRole = users.find(u => u.id === selectedUser)?.role;
       updateUser(selectedUser, {
         name: formData.name,
         email: formData.email,
@@ -69,6 +79,10 @@ export const MemberList = ({ onNavigate, currentPath }: MemberListProps) => {
       
       if (selectedUser === user?.id && formData.role !== user.role) {
         setUser({ ...user, role: formData.role });
+      }
+      
+      if (oldRole !== formData.role) {
+        alert('角色已修改，侧边栏权限将在下一次登录时生效');
       }
     }
     setShowEditModal(false);
@@ -79,14 +93,33 @@ export const MemberList = ({ onNavigate, currentPath }: MemberListProps) => {
   const handleDelete = () => {
     if (selectedUser && selectedUser !== user?.id) {
       deleteUser(selectedUser);
+      alert('成员已删除');
     }
     setShowDeleteModal(false);
+    setShowReassignModal(false);
     setSelectedUser(null);
+    setNewAssigneeId('');
+  };
+
+  const handleReassignAndDelete = () => {
+    if (selectedUser && newAssigneeId) {
+      reassignTasks(selectedUser, newAssigneeId);
+      deleteUser(selectedUser);
+      alert('成员已删除，关联任务已重新分配');
+    }
+    setShowDeleteModal(false);
+    setShowReassignModal(false);
+    setSelectedUser(null);
+    setNewAssigneeId('');
   };
 
   const getSelectedUserObj = () => {
     if (!selectedUser) return null;
     return users.find(u => u.id === selectedUser);
+  };
+
+  const getAvailableAssignees = () => {
+    return users.filter(u => u.id !== selectedUser && u.id !== user?.id);
   };
 
   if (user?.role !== 'admin') {
@@ -163,7 +196,7 @@ export const MemberList = ({ onNavigate, currentPath }: MemberListProps) => {
                 </span>
               </div>
               
-              <div className="grid grid-cols-3 gap-2 mb-4">
+              <div className="grid grid-cols-4 gap-2 mb-4">
                 <div className="text-center p-2 bg-gray-50 rounded-lg">
                   <p className="text-lg font-bold text-gray-800">{stats.totalTasks}</p>
                   <p className="text-xs text-gray-500">总任务</p>
@@ -171,6 +204,10 @@ export const MemberList = ({ onNavigate, currentPath }: MemberListProps) => {
                 <div className="text-center p-2 bg-green-50 rounded-lg">
                   <p className="text-lg font-bold text-green-600">{stats.completedTasks}</p>
                   <p className="text-xs text-green-600">已完成</p>
+                </div>
+                <div className="text-center p-2 bg-yellow-50 rounded-lg">
+                  <p className="text-lg font-bold text-yellow-600">{stats.pendingTasks}</p>
+                  <p className="text-xs text-yellow-600">进行中</p>
                 </div>
                 <div className="text-center p-2 bg-blue-50 rounded-lg">
                   <p className="text-lg font-bold text-blue-600">{stats.totalAnnotations}</p>
@@ -256,6 +293,11 @@ export const MemberList = ({ onNavigate, currentPath }: MemberListProps) => {
               <option value="admin">管理员</option>
             </select>
           </div>
+          <div className="p-3 bg-blue-50 rounded-lg">
+            <p className="text-sm text-blue-700">
+              新增成员默认密码为：<span className="font-medium">123456</span>
+            </p>
+          </div>
           <div className="flex justify-end gap-3 pt-4">
             <Button variant="secondary" onClick={() => setShowCreateModal(false)}>
               取消
@@ -330,21 +372,73 @@ export const MemberList = ({ onNavigate, currentPath }: MemberListProps) => {
         }}
         title="确认删除"
       >
-        <div className="space-y-4">
-          <p className="text-gray-600">确定要删除成员 <span className="font-medium">{getSelectedUserObj()?.name}</span> 吗？</p>
-          <p className="text-sm text-gray-500">此操作将删除该成员的所有关联数据，且无法撤销。</p>
-          <div className="flex justify-end gap-3">
-            <Button variant="secondary" onClick={() => {
-              setShowDeleteModal(false);
-              setSelectedUser(null);
-            }}>
-              取消
-            </Button>
-            <Button variant="danger" onClick={handleDelete}>
-              确认删除
-            </Button>
+        {getSelectedUserObj() && (
+          <div className="space-y-4">
+            <p className="text-gray-600">确定要删除成员 <span className="font-medium">{getSelectedUserObj()?.name}</span> 吗？</p>
+            
+            {getUncompletedTasks(selectedUser!).length > 0 && (
+              <div className="p-3 bg-yellow-50 rounded-lg flex items-start gap-2">
+                <AlertTriangle className="w-5 h-5 text-yellow-600 flex-shrink-0 mt-0.5" />
+                <div>
+                  <p className="text-sm font-medium text-yellow-800">存在未完成任务</p>
+                  <p className="text-sm text-yellow-600">
+                    该成员有 {getUncompletedTasks(selectedUser!).length} 个未完成的任务，删除前需要处理这些任务。
+                  </p>
+                </div>
+              </div>
+            )}
+            
+            {getUncompletedTasks(selectedUser!).length > 0 ? (
+              <>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">将任务重新分配给</label>
+                  <select
+                    value={newAssigneeId}
+                    onChange={(e) => setNewAssigneeId(e.target.value)}
+                    className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+                  >
+                    <option value="">请选择新的负责人</option>
+                    {getAvailableAssignees().map(assignee => (
+                      <option key={assignee.id} value={assignee.id}>
+                        {assignee.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="flex justify-end gap-3">
+                  <Button variant="secondary" onClick={() => {
+                    setShowDeleteModal(false);
+                    setSelectedUser(null);
+                  }}>
+                    取消
+                  </Button>
+                  <Button 
+                    variant="danger" 
+                    onClick={handleReassignAndDelete}
+                    disabled={!newAssigneeId}
+                  >
+                    确认删除并重新分配任务
+                  </Button>
+                </div>
+              </>
+            ) : (
+              <>
+                <p className="text-sm text-gray-500">此操作将删除该成员的所有关联数据，且无法撤销。</p>
+                <div className="flex justify-end gap-3">
+                  <Button variant="secondary" onClick={() => {
+                    setShowDeleteModal(false);
+                    setSelectedUser(null);
+                  }}>
+                    取消
+                  </Button>
+                  <Button variant="danger" onClick={handleDelete}>
+                    确认删除
+                  </Button>
+                </div>
+              </>
+            )}
           </div>
-        </div>
+        )}
       </Modal>
     </Layout>
   );

@@ -32,13 +32,14 @@ export const AnnotationWorkbench = ({ onNavigate, currentPath }: AnnotationWorkb
     removeDraftBox, 
     clearDraft,
     annotations,
-    addAnnotation,
+    saveAnnotationDraft,
     submitAnnotation,
     categories,
     tasks,
     updateTask,
     user,
-    images
+    images,
+    batches
   } = useStore();
   
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
@@ -56,13 +57,15 @@ export const AnnotationWorkbench = ({ onNavigate, currentPath }: AnnotationWorkb
   const currentImage = images[currentImageIndex] || { id: 'temp', batchId: '', fileName: 'road.jpg', storagePath: '', width: 1920, height: 1080, createdAt: '' };
   const scale = 0.5;
 
-  const myTasks = user ? tasks.filter(t => t.assigneeId === user.id && t.status === 'pending') : [];
+  const myTasks = user ? tasks.filter(t => t.assigneeId === user.id && (t.status === 'pending' || t.status === 'in_progress')) : [];
   const currentTask = myTasks[0];
   
   useEffect(() => {
-    const savedBoxes = annotations.find(a => a.imageId === currentImage.id && a.status === 'draft');
-    if (savedBoxes && savedBoxes.boxes.length > 0) {
-      setDraftBoxes(savedBoxes.boxes);
+    const savedAnnotation = annotations.find(a => a.imageId === currentImage.id);
+    if (savedAnnotation && savedAnnotation.boxes.length > 0) {
+      setDraftBoxes(savedAnnotation.boxes);
+    } else {
+      setDraftBoxes([]);
     }
   }, [currentImage.id, annotations, setDraftBoxes]);
   
@@ -185,51 +188,29 @@ export const AnnotationWorkbench = ({ onNavigate, currentPath }: AnnotationWorkb
   };
 
   const handleSaveDraft = () => {
-    const existingAnnotation = annotations.find(a => a.imageId === currentImage.id);
-    if (existingAnnotation) {
-      addAnnotation({
-        ...existingAnnotation,
-        boxes: draftBoxes,
-        status: 'draft',
-      });
-    } else {
-      addAnnotation({
-        taskId: currentTask?.id || '',
-        imageId: currentImage.id,
-        boxes: draftBoxes,
-        status: 'draft',
-      });
+    if (currentTask && currentImage.id !== 'temp') {
+      saveAnnotationDraft(currentTask.id, currentImage.id, draftBoxes);
+      alert('草稿已保存');
     }
-    alert('草稿已保存');
   };
 
   const handleSubmit = () => {
-    const existingAnnotation = annotations.find(a => a.imageId === currentImage.id);
-    
-    if (existingAnnotation) {
-      addAnnotation({
-        ...existingAnnotation,
-        boxes: draftBoxes,
-        status: 'submitted',
-      });
-    } else {
-      addAnnotation({
-        taskId: currentTask?.id || '',
-        imageId: currentImage.id,
-        boxes: draftBoxes,
-        status: 'submitted',
-      });
-    }
+    if (currentTask && currentImage.id !== 'temp') {
+      submitAnnotation(currentTask.id, currentImage.id, draftBoxes);
 
-    if (currentTask && currentTask.status === 'pending') {
-      updateTask(currentTask.id, { status: 'in_progress' });
-    }
+      if (currentTask.status === 'pending') {
+        updateTask(currentTask.id, { status: 'in_progress' });
+      } else if (currentTask.status === 'in_progress') {
+        updateTask(currentTask.id, { status: 'reviewing' });
+      }
 
-    setShowSubmitModal(false);
-    clearDraft();
-    setSelectedBox(null);
-    setSelectedCategory(null);
-    setProperties({});
+      setShowSubmitModal(false);
+      clearDraft();
+      setSelectedBox(null);
+      setSelectedCategory(null);
+      setProperties({});
+      alert('提交成功，已进入审核队列');
+    }
   };
 
   const handlePrevImage = () => {
@@ -259,6 +240,8 @@ export const AnnotationWorkbench = ({ onNavigate, currentPath }: AnnotationWorkb
     const index = categories.findIndex(c => c.code === categoryCode);
     return colors[index % colors.length];
   };
+
+  const currentBatch = batches.find(b => b.id === currentImage.batchId);
 
   return (
     <Layout 
@@ -292,7 +275,8 @@ export const AnnotationWorkbench = ({ onNavigate, currentPath }: AnnotationWorkb
                   <ChevronRight className="w-4 h-4" />
                 </Button>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-4">
+                <span className="text-sm text-gray-500">{currentBatch?.name || '-'}</span>
                 <span className="text-sm text-gray-500">{currentImage?.fileName}</span>
               </div>
             </div>

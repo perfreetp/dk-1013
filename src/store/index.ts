@@ -38,6 +38,7 @@ interface Store {
   addUser: (user: Omit<User, 'id' | 'createdAt' | 'updatedAt'>) => void;
   updateUser: (id: string, updates: Partial<User>) => void;
   deleteUser: (id: string) => void;
+  findUserByEmail: (email: string) => User | undefined;
 
   batches: Batch[];
   addBatch: (batch: Omit<Batch, 'id' | 'createdAt'>) => void;
@@ -49,13 +50,14 @@ interface Store {
   tasks: Task[];
   addTask: (task: Omit<Task, 'id' | 'createdAt' | 'updatedAt'>) => void;
   updateTask: (id: string, updates: Partial<Task>) => void;
+  reassignTasks: (oldAssigneeId: string, newAssigneeId: string) => void;
 
   annotations: Annotation[];
-  addAnnotation: (annotation: Omit<Annotation, 'id' | 'createdAt' | 'updatedAt'>) => void;
-  updateAnnotation: (id: string, updates: Partial<Annotation>) => void;
-  submitAnnotation: (id: string) => void;
+  saveAnnotationDraft: (taskId: string, imageId: string, boxes: Box[]) => void;
+  submitAnnotation: (taskId: string, imageId: string, boxes: Box[]) => void;
   approveAnnotation: (id: string) => void;
   rejectAnnotation: (id: string, comments: string) => void;
+  getAnnotationForImage: (imageId: string) => Annotation | undefined;
 
   reviews: Review[];
   addReview: (review: Omit<Review, 'id' | 'createdAt'>) => void;
@@ -117,6 +119,9 @@ export const useStore = create<Store>()(
       deleteUser: (id) => set((state) => ({
         users: state.users.filter((user) => user.id !== id),
       })),
+      findUserByEmail: (email) => {
+        return get().users.find((user) => user.email === email);
+      },
 
       batches: initialBatches,
       addBatch: (batch) => set((state) => ({
@@ -155,26 +160,71 @@ export const useStore = create<Store>()(
           task.id === id ? { ...task, ...updates, updatedAt: now() } : task
         ),
       })),
+      reassignTasks: (oldAssigneeId, newAssigneeId) => set((state) => ({
+        tasks: state.tasks.map((task) =>
+          task.assigneeId === oldAssigneeId
+            ? { ...task, assigneeId: newAssigneeId, updatedAt: now() }
+            : task
+        ),
+      })),
 
       annotations: initialAnnotations,
-      addAnnotation: (annotation) => set((state) => ({
-        annotations: [...state.annotations, {
-          ...annotation,
-          id: generateId(),
-          createdAt: now(),
-          updatedAt: now(),
-        }],
-      })),
-      updateAnnotation: (id, updates) => set((state) => ({
-        annotations: state.annotations.map((annotation) =>
-          annotation.id === id ? { ...annotation, ...updates, updatedAt: now() } : annotation
-        ),
-      })),
-      submitAnnotation: (id) => set((state) => ({
-        annotations: state.annotations.map((annotation) =>
-          annotation.id === id ? { ...annotation, status: 'submitted', updatedAt: now() } : annotation
-        ),
-      })),
+      saveAnnotationDraft: (taskId, imageId, boxes) => set((state) => {
+        const existingIndex = state.annotations.findIndex(
+          (a) => a.imageId === imageId && a.status === 'draft'
+        );
+        
+        if (existingIndex >= 0) {
+          const newAnnotations = [...state.annotations];
+          newAnnotations[existingIndex] = {
+            ...newAnnotations[existingIndex],
+            boxes,
+            updatedAt: now(),
+          };
+          return { annotations: newAnnotations };
+        } else {
+          return {
+            annotations: [...state.annotations, {
+              id: generateId(),
+              taskId,
+              imageId,
+              boxes,
+              status: 'draft',
+              createdAt: now(),
+              updatedAt: now(),
+            }],
+          };
+        }
+      }),
+      submitAnnotation: (taskId, imageId, boxes) => set((state) => {
+        const existingIndex = state.annotations.findIndex(
+          (a) => a.imageId === imageId
+        );
+        
+        if (existingIndex >= 0) {
+          const newAnnotations = [...state.annotations];
+          newAnnotations[existingIndex] = {
+            ...newAnnotations[existingIndex],
+            taskId,
+            boxes,
+            status: 'submitted',
+            updatedAt: now(),
+          };
+          return { annotations: newAnnotations };
+        } else {
+          return {
+            annotations: [...state.annotations, {
+              id: generateId(),
+              taskId,
+              imageId,
+              boxes,
+              status: 'submitted',
+              createdAt: now(),
+              updatedAt: now(),
+            }],
+          };
+        }
+      }),
       approveAnnotation: (id) => {
         const annotation = get().annotations.find((a) => a.id === id);
         if (annotation) {
@@ -195,7 +245,7 @@ export const useStore = create<Store>()(
         if (annotation) {
           set((state) => ({
             annotations: state.annotations.map((a) =>
-              a.id === id ? { ...a, status: 'rejected', updatedAt: now() } : a
+              a.id === id ? { ...a, status: 'draft', updatedAt: now() } : a
             ),
             reviews: [...state.reviews, {
               id: generateId(),
@@ -207,6 +257,9 @@ export const useStore = create<Store>()(
             }],
           }));
         }
+      },
+      getAnnotationForImage: (imageId) => {
+        return get().annotations.find((a) => a.imageId === imageId);
       },
 
       reviews: initialReviews,
