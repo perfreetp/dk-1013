@@ -25,7 +25,6 @@ export const MemberList = ({ onNavigate, currentPath }: MemberListProps) => {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
-  const [showReassignModal, setShowReassignModal] = useState(false);
   const [selectedUser, setSelectedUser] = useState<string | null>(null);
   const [newAssigneeId, setNewAssigneeId] = useState<string>('');
   const [formData, setFormData] = useState({
@@ -58,31 +57,53 @@ export const MemberList = ({ onNavigate, currentPath }: MemberListProps) => {
   };
 
   const handleCreate = () => {
+    const existingUser = users.find(u => u.email === formData.email);
+    if (existingUser) {
+      alert('该邮箱已被注册');
+      return;
+    }
+    
     addUser({
       name: formData.name,
       email: formData.email,
       role: formData.role,
     });
-    alert(`成员 ${formData.name} 添加成功！默认密码为: 123456`);
+    alert(`成员 ${formData.name} 添加成功！密码为: 123456`);
     setShowCreateModal(false);
     setFormData({ name: '', email: '', role: 'annotator' });
   };
 
   const handleEdit = () => {
     if (selectedUser) {
+      const existingUser = users.find(u => u.email === formData.email && u.id !== selectedUser);
+      if (existingUser) {
+        alert('该邮箱已被其他成员使用');
+        return;
+      }
+      
       const oldRole = users.find(u => u.id === selectedUser)?.role;
+      const oldEmail = users.find(u => u.id === selectedUser)?.email;
       updateUser(selectedUser, {
         name: formData.name,
         email: formData.email,
         role: formData.role,
       });
       
-      if (selectedUser === user?.id && formData.role !== user.role) {
-        setUser({ ...user, role: formData.role });
+      if (selectedUser === user?.id) {
+        setUser({ 
+          ...user, 
+          name: formData.name, 
+          email: formData.email, 
+          role: formData.role 
+        });
       }
       
       if (oldRole !== formData.role) {
         alert('角色已修改，侧边栏权限将在下一次登录时生效');
+      }
+      
+      if (oldEmail !== formData.email) {
+        alert('邮箱已修改，下次登录请使用新邮箱');
       }
     }
     setShowEditModal(false);
@@ -96,7 +117,6 @@ export const MemberList = ({ onNavigate, currentPath }: MemberListProps) => {
       alert('成员已删除');
     }
     setShowDeleteModal(false);
-    setShowReassignModal(false);
     setSelectedUser(null);
     setNewAssigneeId('');
   };
@@ -108,7 +128,6 @@ export const MemberList = ({ onNavigate, currentPath }: MemberListProps) => {
       alert('成员已删除，关联任务已重新分配');
     }
     setShowDeleteModal(false);
-    setShowReassignModal(false);
     setSelectedUser(null);
     setNewAssigneeId('');
   };
@@ -119,7 +138,11 @@ export const MemberList = ({ onNavigate, currentPath }: MemberListProps) => {
   };
 
   const getAvailableAssignees = () => {
-    return users.filter(u => u.id !== selectedUser && u.id !== user?.id);
+    return users.filter(u => 
+      u.id !== selectedUser && 
+      u.id !== user?.id &&
+      (u.role === 'annotator' || u.role === 'admin')
+    );
   };
 
   if (user?.role !== 'admin') {
@@ -295,7 +318,7 @@ export const MemberList = ({ onNavigate, currentPath }: MemberListProps) => {
           </div>
           <div className="p-3 bg-blue-50 rounded-lg">
             <p className="text-sm text-blue-700">
-              新增成员默认密码为：<span className="font-medium">123456</span>
+              新增成员密码为：<span className="font-medium">123456</span>
             </p>
           </div>
           <div className="flex justify-end gap-3 pt-4">
@@ -398,11 +421,15 @@ export const MemberList = ({ onNavigate, currentPath }: MemberListProps) => {
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
                   >
                     <option value="">请选择新的负责人</option>
-                    {getAvailableAssignees().map(assignee => (
-                      <option key={assignee.id} value={assignee.id}>
-                        {assignee.name}
-                      </option>
-                    ))}
+                    {getAvailableAssignees().length > 0 ? (
+                      getAvailableAssignees().map(assignee => (
+                        <option key={assignee.id} value={assignee.id}>
+                          {assignee.name} ({getRoleText(assignee.role)})
+                        </option>
+                      ))
+                    ) : (
+                      <option value="" disabled>暂无可用的标注员</option>
+                    )}
                   </select>
                 </div>
                 <div className="flex justify-end gap-3">
@@ -415,11 +442,16 @@ export const MemberList = ({ onNavigate, currentPath }: MemberListProps) => {
                   <Button 
                     variant="danger" 
                     onClick={handleReassignAndDelete}
-                    disabled={!newAssigneeId}
+                    disabled={!newAssigneeId || getAvailableAssignees().length === 0}
                   >
                     确认删除并重新分配任务
                   </Button>
                 </div>
+                {getAvailableAssignees().length === 0 && (
+                  <p className="text-sm text-red-500">
+                    没有可用的标注员来接收这些任务，请先添加标注员或完成现有任务。
+                  </p>
+                )}
               </>
             ) : (
               <>

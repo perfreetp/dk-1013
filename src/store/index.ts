@@ -39,6 +39,7 @@ interface Store {
   updateUser: (id: string, updates: Partial<User>) => void;
   deleteUser: (id: string) => void;
   findUserByEmail: (email: string) => User | undefined;
+  findUserById: (id: string) => User | undefined;
 
   batches: Batch[];
   addBatch: (batch: Omit<Batch, 'id' | 'createdAt'>) => void;
@@ -122,6 +123,9 @@ export const useStore = create<Store>()(
       findUserByEmail: (email) => {
         return get().users.find((user) => user.email === email);
       },
+      findUserById: (id) => {
+        return get().users.find((user) => user.id === id);
+      },
 
       batches: initialBatches,
       addBatch: (batch) => set((state) => ({
@@ -135,6 +139,10 @@ export const useStore = create<Store>()(
         batches: state.batches.filter((batch) => batch.id !== id),
         images: state.images.filter((image) => image.batchId !== id),
         tasks: state.tasks.filter((task) => task.batchId !== id),
+        annotations: state.annotations.filter((a) => {
+          const task = state.tasks.find(t => t.id === a.taskId);
+          return task?.batchId !== id;
+        }),
       })),
 
       images: initialImages,
@@ -171,14 +179,16 @@ export const useStore = create<Store>()(
       annotations: initialAnnotations,
       saveAnnotationDraft: (taskId, imageId, boxes) => set((state) => {
         const existingIndex = state.annotations.findIndex(
-          (a) => a.imageId === imageId && a.status === 'draft'
+          (a) => a.imageId === imageId
         );
         
         if (existingIndex >= 0) {
           const newAnnotations = [...state.annotations];
           newAnnotations[existingIndex] = {
             ...newAnnotations[existingIndex],
+            taskId,
             boxes,
+            status: 'draft',
             updatedAt: now(),
           };
           return { annotations: newAnnotations };
@@ -246,6 +256,11 @@ export const useStore = create<Store>()(
           set((state) => ({
             annotations: state.annotations.map((a) =>
               a.id === id ? { ...a, status: 'draft', updatedAt: now() } : a
+            ),
+            tasks: state.tasks.map((t) =>
+              t.id === annotation.taskId && t.status === 'reviewing'
+                ? { ...t, status: 'in_progress', updatedAt: now() }
+                : t
             ),
             reviews: [...state.reviews, {
               id: generateId(),

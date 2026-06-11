@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import { FolderOpen, Mail, Lock } from 'lucide-react';
 import { Button } from '../components/Common/Button';
-import { mockUsers } from '../data/mockData';
 import { useStore } from '../store';
 
 interface LoginProps {
@@ -13,13 +12,15 @@ export const Login = ({ onNavigate }: LoginProps) => {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
 
+  const { findUserByEmail, setUser } = useStore();
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     
-    const user = mockUsers.find(u => u.email === email);
+    const user = findUserByEmail(email);
     
     if (user && password === '123456') {
-      useStore.getState().setUser(user);
+      setUser(user);
       onNavigate('/');
     } else {
       setError('邮箱或密码错误');
@@ -82,7 +83,7 @@ export const Login = ({ onNavigate }: LoginProps) => {
             </Button>
             
             <p className="text-center text-gray-500 text-sm mt-4">
-              测试账号：admin@road.com / 123456
+              默认密码：123456
             </p>
           </form>
         </div>

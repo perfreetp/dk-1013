@@ -6,7 +6,8 @@ import {
   Calendar,
   User,
   ChevronDown,
-  MoreHorizontal
+  MoreHorizontal,
+  AlertCircle
 } from 'lucide-react';
 import { Layout } from '../components/Layout/Layout';
 import { Button } from '../components/Common/Button';
@@ -20,7 +21,7 @@ interface TaskListProps {
 }
 
 export const TaskList = ({ onNavigate, currentPath }: TaskListProps) => {
-  const { tasks, batches, users, addTask, user } = useStore();
+  const { tasks, batches, users, addTask, updateTask, user } = useStore();
   const [searchTerm, setSearchTerm] = useState('');
   const [showFilters, setShowFilters] = useState(false);
   const [selectedStatus, setSelectedStatus] = useState('');
@@ -28,13 +29,15 @@ export const TaskList = ({ onNavigate, currentPath }: TaskListProps) => {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showDetailModal, setShowDetailModal] = useState(false);
   const [selectedTask, setSelectedTask] = useState<string | null>(null);
+  const [showReassignModal, setShowReassignModal] = useState(false);
+  const [reassignAssigneeId, setReassignAssigneeId] = useState('');
   const [formData, setFormData] = useState({
     batchId: '',
     assigneeId: '',
     deadline: '',
   });
 
-  const annotators = users.filter(u => u.role === 'annotator');
+  const availableAnnotators = users.filter(u => u.role === 'annotator' || u.role === 'admin');
 
   const filteredTasks = tasks.filter(task => {
     const batch = batches.find(b => b.id === task.batchId);
@@ -51,6 +54,15 @@ export const TaskList = ({ onNavigate, currentPath }: TaskListProps) => {
   });
 
   const handleCreate = () => {
+    if (!formData.batchId) {
+      alert('请选择数据批次');
+      return;
+    }
+    if (!formData.assigneeId) {
+      alert('请选择标注员');
+      return;
+    }
+    
     addTask({
       batchId: formData.batchId,
       assigneeId: formData.assigneeId,
@@ -61,6 +73,16 @@ export const TaskList = ({ onNavigate, currentPath }: TaskListProps) => {
     setFormData({ batchId: '', assigneeId: '', deadline: '' });
   };
 
+  const handleReassign = () => {
+    if (selectedTask && reassignAssigneeId) {
+      updateTask(selectedTask, { assigneeId: reassignAssigneeId });
+      alert('任务已重新分配');
+      setShowReassignModal(false);
+      setSelectedTask(null);
+      setReassignAssigneeId('');
+    }
+  };
+
   const getTask = (id: string | null) => {
     if (!id) return null;
     const task = tasks.find(t => t.id === id);
@@ -69,6 +91,7 @@ export const TaskList = ({ onNavigate, currentPath }: TaskListProps) => {
       ...task,
       batch: batches.find(b => b.id === task.batchId),
       assignee: users.find(u => u.id === task.assigneeId),
+      assigneeExists: !!users.find(u => u.id === task.assigneeId),
     };
   };
 
@@ -142,7 +165,7 @@ export const TaskList = ({ onNavigate, currentPath }: TaskListProps) => {
                   className="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
                 >
                   <option value="">全部标注员</option>
-                  {annotators.map(annotator => (
+                  {availableAnnotators.map(annotator => (
                     <option key={annotator.id} value={annotator.id}>{annotator.name}</option>
                   ))}
                 </select>
@@ -177,6 +200,8 @@ export const TaskList = ({ onNavigate, currentPath }: TaskListProps) => {
             {filteredTasks.map((task) => {
               const batch = batches.find(b => b.id === task.batchId);
               const assignee = users.find(u => u.id === task.assigneeId);
+              const assigneeExists = !!assignee;
+              
               return (
                 <tr key={task.id} className="hover:bg-gray-50 transition-colors">
                   <td className="px-6 py-4">
@@ -187,10 +212,19 @@ export const TaskList = ({ onNavigate, currentPath }: TaskListProps) => {
                   </td>
                   <td className="px-6 py-4">
                     <div className="flex items-center gap-2">
-                      <div className="w-8 h-8 bg-primary-100 rounded-full flex items-center justify-center text-sm font-medium text-primary-600">
-                        {assignee?.name?.charAt(0)}
-                      </div>
-                      <span className="text-sm text-gray-600">{assignee?.name}</span>
+                      {assigneeExists ? (
+                        <>
+                          <div className="w-8 h-8 bg-primary-100 rounded-full flex items-center justify-center text-sm font-medium text-primary-600">
+                            {assignee?.name?.charAt(0)}
+                          </div>
+                          <span className="text-sm text-gray-600">{assignee?.name}</span>
+                        </>
+                      ) : (
+                        <div className="flex items-center gap-2 text-red-500">
+                          <AlertCircle className="w-4 h-4" />
+                          <span className="text-sm font-medium">负责人已删除</span>
+                        </div>
+                      )}
                     </div>
                   </td>
                   <td className="px-6 py-4">
@@ -257,9 +291,13 @@ export const TaskList = ({ onNavigate, currentPath }: TaskListProps) => {
               className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
             >
               <option value="">请选择标注员</option>
-              {annotators.map(annotator => (
-                <option key={annotator.id} value={annotator.id}>{annotator.name}</option>
-              ))}
+              {availableAnnotators.length > 0 ? (
+                availableAnnotators.map(annotator => (
+                  <option key={annotator.id} value={annotator.id}>{annotator.name} ({annotator.role === 'admin' ? '管理员' : '标注员'})</option>
+                ))
+              ) : (
+                <option value="" disabled>暂无可用标注员</option>
+              )}
             </select>
           </div>
           <div>
@@ -271,11 +309,22 @@ export const TaskList = ({ onNavigate, currentPath }: TaskListProps) => {
               className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
             />
           </div>
+          {availableAnnotators.length === 0 && (
+            <div className="p-3 bg-yellow-50 rounded-lg">
+              <p className="text-sm text-yellow-700">
+                <AlertCircle className="w-4 h-4 inline mr-2" />
+                没有可用的标注员，请先在成员管理中添加标注员或管理员
+              </p>
+            </div>
+          )}
           <div className="flex justify-end gap-3 pt-4">
             <Button variant="secondary" onClick={() => setShowCreateModal(false)}>
               取消
             </Button>
-            <Button onClick={handleCreate}>
+            <Button 
+              onClick={handleCreate}
+              disabled={availableAnnotators.length === 0}
+            >
               创建任务
             </Button>
           </div>
@@ -299,6 +348,14 @@ export const TaskList = ({ onNavigate, currentPath }: TaskListProps) => {
                 {getStatusText(getTask(selectedTask)?.status || '')}
               </span>
             </div>
+            
+            {!getTask(selectedTask)?.assigneeExists && (
+              <div className="p-3 bg-red-50 rounded-lg flex items-center gap-2">
+                <AlertCircle className="w-5 h-5 text-red-600" />
+                <p className="text-sm text-red-700">警告：该任务的负责人已被删除，请重新分配</p>
+              </div>
+            )}
+            
             <div className="space-y-3">
               <div className="flex justify-between py-2 border-b border-gray-100">
                 <span className="text-gray-500">路段</span>
@@ -310,7 +367,9 @@ export const TaskList = ({ onNavigate, currentPath }: TaskListProps) => {
               </div>
               <div className="flex justify-between py-2 border-b border-gray-100">
                 <span className="text-gray-500">标注员</span>
-                <span className="font-medium text-gray-800">{getTask(selectedTask)?.assignee?.name}</span>
+                <span className={`font-medium ${getTask(selectedTask)?.assigneeExists ? 'text-gray-800' : 'text-red-500'}`}>
+                  {getTask(selectedTask)?.assignee?.name || '已删除'}
+                </span>
               </div>
               <div className="flex justify-between py-2 border-b border-gray-100">
                 <span className="text-gray-500">截止日期</span>
@@ -328,19 +387,63 @@ export const TaskList = ({ onNavigate, currentPath }: TaskListProps) => {
               }}>
                 关闭
               </Button>
-              {user?.role !== 'annotator' && (
-                <Button onClick={() => onNavigate('/workbench')}>
-                  查看详情
+              {user?.role === 'admin' && !getTask(selectedTask)?.assigneeExists && (
+                <Button onClick={() => {
+                  setShowDetailModal(false);
+                  setShowReassignModal(true);
+                }}>
+                  重新分配
                 </Button>
               )}
-              {user?.role === 'annotator' && getTask(selectedTask)?.status === 'pending' && (
+              {(user?.role === 'annotator' || user?.role === 'admin') && getTask(selectedTask)?.assigneeExists && (
                 <Button onClick={() => onNavigate('/workbench')}>
-                  开始标注
+                  {user?.role === 'annotator' ? '开始标注' : '查看工作台'}
                 </Button>
               )}
             </div>
           </div>
         )}
+      </Modal>
+
+      <Modal 
+        isOpen={showReassignModal}
+        onClose={() => {
+          setShowReassignModal(false);
+          setSelectedTask(null);
+          setReassignAssigneeId('');
+        }}
+        title="重新分配任务"
+      >
+        <div className="space-y-4">
+          <p className="text-gray-600">请选择新的负责人来接收此任务：</p>
+          <div>
+            <select
+              value={reassignAssigneeId}
+              onChange={(e) => setReassignAssigneeId(e.target.value)}
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+            >
+              <option value="">请选择标注员</option>
+              {availableAnnotators.map(annotator => (
+                <option key={annotator.id} value={annotator.id}>{annotator.name} ({annotator.role === 'admin' ? '管理员' : '标注员'})</option>
+              ))}
+            </select>
+          </div>
+          <div className="flex justify-end gap-3">
+            <Button variant="secondary" onClick={() => {
+              setShowReassignModal(false);
+              setSelectedTask(null);
+              setReassignAssigneeId('');
+            }}>
+              取消
+            </Button>
+            <Button 
+              onClick={handleReassign}
+              disabled={!reassignAssigneeId}
+            >
+              确认分配
+            </Button>
+          </div>
+        </div>
       </Modal>
     </Layout>
   );
