@@ -27,6 +27,9 @@ interface Store {
   currentTask: Task | null;
   setCurrentTask: (task: Task | null) => void;
   
+  currentImageId: string | null;
+  setCurrentImageId: (imageId: string | null) => void;
+  
   draftBoxes: Box[];
   setDraftBoxes: (boxes: Box[]) => void;
   addDraftBox: (box: Box) => void;
@@ -47,6 +50,7 @@ interface Store {
 
   images: Image[];
   addImages: (images: Omit<Image, 'id' | 'createdAt'>[]) => void;
+  getImagesByBatchId: (batchId: string) => Image[];
 
   tasks: Task[];
   addTask: (task: Omit<Task, 'id' | 'createdAt' | 'updatedAt'>) => void;
@@ -59,9 +63,14 @@ interface Store {
   approveAnnotation: (id: string) => void;
   rejectAnnotation: (id: string, comments: string) => void;
   getAnnotationForImage: (imageId: string) => Annotation | undefined;
+  getLatestAnnotationForImage: (imageId: string) => Annotation | undefined;
+  getRejectedImages: (taskId: string) => string[];
+  deleteOldAnnotations: (imageId: string) => void;
+  getLatestAnnotations: () => Annotation[];
 
   reviews: Review[];
   addReview: (review: Omit<Review, 'id' | 'createdAt'>) => void;
+  getReviewsForAnnotation: (annotationId: string) => Review[];
 
   categories: Category[];
 }
@@ -89,6 +98,9 @@ export const useStore = create<Store>()(
       
       currentTask: null,
       setCurrentTask: (task) => set({ currentTask: task }),
+      
+      currentImageId: null,
+      setCurrentImageId: (imageId) => set({ currentImageId: imageId }),
       
       draftBoxes: [],
       setDraftBoxes: (boxes) => set({ draftBoxes: boxes }),
@@ -153,6 +165,9 @@ export const useStore = create<Store>()(
           createdAt: now(),
         }))],
       })),
+      getImagesByBatchId: (batchId) => {
+        return get().images.filter((image) => image.batchId === batchId);
+      },
 
       tasks: initialTasks,
       addTask: (task) => set((state) => ({
@@ -276,6 +291,64 @@ export const useStore = create<Store>()(
       getAnnotationForImage: (imageId) => {
         return get().annotations.find((a) => a.imageId === imageId);
       },
+      getLatestAnnotationForImage: (imageId) => {
+        const annotations = get().annotations.filter((a) => a.imageId === imageId);
+        if (annotations.length === 0) return undefined;
+        return annotations.reduce((latest, current) => 
+          current.updatedAt > latest.updatedAt ? current : latest
+        );
+      },
+      getRejectedImages: (taskId: string) => {
+        const task = get().tasks.find(t => t.id === taskId);
+        if (!task) return [];
+        
+        const taskImages = get().images.filter(img => img.batchId === task.batchId);
+        const rejectedImages: string[] = [];
+        
+        taskImages.forEach(img => {
+          const annotation = get().annotations.find(a => a.imageId === img.id);
+          if (annotation) {
+            const reviews = get().reviews.filter(r => r.annotationId === annotation.id);
+            const hasRejection = reviews.some(r => r.result === 'rejected');
+            const lastReview = reviews.sort((a, b) => 
+              (new Date(b.createdAt).getTime() as number) - (new Date(a.createdAt).getTime() as number)
+            )[0];
+            
+            if (hasRejection && (!lastReview || lastReview.result === 'rejected')) {
+              rejectedImages.push(img.id);
+            }
+          }
+        });
+        
+        return rejectedImages;
+      },
+      deleteOldAnnotations: (imageId) => set((state) => {
+        const annotations = state.annotations.filter((a) => a.imageId === imageId);
+        if (annotations.length <= 1) return state;
+        
+        const latest = annotations.reduce((latest, current) => 
+          current.updatedAt > latest.updatedAt ? current : latest
+        );
+        
+        return {
+          annotations: state.annotations.filter((a) => 
+            a.imageId !== imageId || a.id === latest.id
+          ),
+        };
+      }),
+      getLatestAnnotations: () => {
+        const allAnnotations = get().annotations;
+        const imageMap = new Map<string, Annotation>();
+        
+        allAnnotations.forEach(annotation => {
+          const existing = imageMap.get(annotation.imageId);
+          if (!existing || annotation.updatedAt > existing.updatedAt) {
+            imageMap.set(annotation.imageId, annotation);
+          }
+        });
+        
+        return Array.from(imageMap.values());
+      },
 
       reviews: initialReviews,
       addReview: (review) => set((state) => ({
@@ -285,6 +358,10 @@ export const useStore = create<Store>()(
           createdAt: now(),
         }],
       })),
+      getReviewsForAnnotation: (annotationId) => {
+        return get().reviews.filter((r) => r.annotationId === annotationId)
+          .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      },
 
       categories: initialCategories,
     }),

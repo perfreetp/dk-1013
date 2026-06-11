@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { 
   Check, 
   X, 
@@ -9,13 +9,17 @@ import {
   Eye,
   BarChart3,
   Shuffle,
-  AlertCircle
+  AlertCircle,
+  Clock,
+  RefreshCw,
+  FileJson,
+  FileText
 } from 'lucide-react';
 import { Layout } from '../components/Layout/Layout';
 import { Button } from '../components/Common/Button';
 import { Modal } from '../components/Common/Modal';
 import { useStore } from '../store';
-import { getStatusText, getStatusColor, downloadJSON, downloadCSV } from '../utils/helpers';
+import { getStatusText, getStatusColor, downloadJSON, downloadCSV, formatDate } from '../utils/helpers';
 
 interface ReviewListProps {
   onNavigate: (path: string) => void;
@@ -28,42 +32,74 @@ export const ReviewList = ({ onNavigate, currentPath }: ReviewListProps) => {
     reviews, 
     images, 
     users, 
+    batches,
+    tasks,
     categories,
     approveAnnotation, 
     rejectAnnotation,
     addReview,
+    getReviewsForAnnotation,
+    getLatestAnnotations,
     user 
   } = useStore();
   
-  const [activeTab, setActiveTab] = useState<'review' | 'statistics' | 'audit'>('review');
+  const [activeTab, setActiveTab] = useState<'review' | 'statistics' | 'audit' | 'export'>('review');
   const [searchTerm, setSearchTerm] = useState('');
   const [showFilters, setShowFilters] = useState(false);
   const [selectedStatus, setSelectedStatus] = useState('');
+  const [selectedBatch, setSelectedBatch] = useState('');
+  const [selectedAnnotator, setSelectedAnnotator] = useState('');
   const [showDetailModal, setShowDetailModal] = useState(false);
   const [selectedAnnotation, setSelectedAnnotation] = useState<string | null>(null);
   const [reviewComment, setReviewComment] = useState('');
-  const [showExportModal, setShowExportModal] = useState(false);
   const [reviewAction, setReviewAction] = useState<'approve' | 'reject'>('approve');
 
-  const pendingAnnotations = annotations.filter(a => a.status === 'submitted');
-  const reviewedAnnotations = annotations.filter(a => a.status === 'reviewed');
-  const draftAnnotations = annotations.filter(a => a.status === 'draft');
+  const annotators = users.filter(u => u.role === 'annotator' || u.role === 'admin');
 
-  const filteredAnnotations = [...pendingAnnotations, ...reviewedAnnotations, ...draftAnnotations].filter(annotation => {
-    const image = images.find(i => i.id === annotation.imageId);
-    const matchesSearch = image?.fileName.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesStatus = !selectedStatus || annotation.status === selectedStatus;
-    return matchesSearch && matchesStatus;
-  });
+  const latestAnnotations = useMemo(() => getLatestAnnotations(), []);
+
+  const filteredAnnotations = useMemo(() => {
+    return latestAnnotations.filter(annotation => {
+      const image = images.find(i => i.id === annotation.imageId);
+      const task = tasks.find(t => t.id === annotation.taskId);
+      const batch = batches.find(b => b.id === task?.batchId);
+      const assignee = users.find(u => u.id === task?.assigneeId);
+      
+      const matchesSearch = image?.fileName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        batch?.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        assignee?.name.toLowerCase().includes(searchTerm.toLowerCase());
+      const matchesStatus = !selectedStatus || annotation.status === selectedStatus;
+      const matchesBatch = !selectedBatch || batch?.id === selectedBatch;
+      const matchesAnnotator = !selectedAnnotator || assignee?.id === selectedAnnotator;
+      
+      return matchesSearch && matchesStatus && matchesBatch && matchesAnnotator;
+    });
+  }, [latestAnnotations, images, tasks, batches, users, searchTerm, selectedStatus, selectedBatch, selectedAnnotator]);
+
+  const pendingAnnotations = latestAnnotations.filter(a => a.status === 'submitted');
+  const reviewedAnnotations = latestAnnotations.filter(a => a.status === 'reviewed');
+  const draftAnnotations = latestAnnotations.filter(a => a.status === 'draft');
 
   const getAnnotation = (id: string | null) => {
     if (!id) return null;
     const annotation = annotations.find(a => a.id === id);
     if (!annotation) return null;
+    const image = images.find(i => i.id === annotation.imageId);
+    const task = tasks.find(t => t.id === annotation.taskId);
+    const batch = batches.find(b => b.id === task?.batchId);
+    const assignee = users.find(u => u.id === task?.assigneeId);
+    const review = reviews.find(r => r.annotationId === annotation.id);
+    const reviewer = review ? users.find(u => u.id === review.reviewerId) : null;
+    
     return {
       ...annotation,
-      image: images.find(i => i.id === annotation.imageId),
-      review: reviews.find(r => r.annotationId === annotation.id),
+      image,
+      task,
+      batch,
+      assignee,
+      review,
+      reviewer,
+      allReviews: getReviewsForAnnotation(id),
     };
   };
 
@@ -94,7 +130,7 @@ export const ReviewList = ({ onNavigate, currentPath }: ReviewListProps) => {
   };
 
   const categoryStats = categories.map(category => {
-    const count = annotations.reduce((sum, annotation) => {
+    const count = latestAnnotations.reduce((sum, annotation) => {
       return sum + annotation.boxes.filter(box => box.category === category.code).length;
     }, 0);
     return { category: category.name, count };
@@ -102,7 +138,7 @@ export const ReviewList = ({ onNavigate, currentPath }: ReviewListProps) => {
 
   const userStats = users.map(userItem => {
     const userReviews = reviews.filter(r => r.reviewerId === userItem.id);
-    const reviewed = annotations.filter(a => {
+    const reviewed = latestAnnotations.filter(a => {
       const review = reviews.find(r => r.annotationId === a.id);
       return review?.reviewerId === userItem.id;
     });
@@ -122,46 +158,67 @@ export const ReviewList = ({ onNavigate, currentPath }: ReviewListProps) => {
     { id: '5', description: '标注框过大包含无关内容', severity: 'low' },
   ];
 
-  const sampleAnnotations = [...annotations].sort(() => Math.random() - 0.5).slice(0, 3);
+  const sampleAnnotations = [...latestAnnotations].sort(() => Math.random() - 0.5).slice(0, 3);
 
   const handleExport = (format: 'json' | 'csv') => {
-    const exportData = annotations.map(a => ({
-      id: a.id,
-      imageId: a.imageId,
-      status: getStatusText(a.status),
-      boxCount: a.boxes.length,
-      boxes: a.boxes.map(b => ({
-        category: b.categoryName,
-        x: b.x,
-        y: b.y,
-        width: b.width,
-        height: b.height,
-        properties: b.properties,
-      })),
-    }));
+    const exportData = filteredAnnotations.map(annotation => {
+      const image = images.find(i => i.id === annotation.imageId);
+      const task = tasks.find(t => t.id === annotation.taskId);
+      const batch = batches.find(b => b.id === task?.batchId);
+      const assignee = users.find(u => u.id === task?.assigneeId);
+      
+      return {
+        id: annotation.id,
+        imageId: annotation.imageId,
+        imageName: image?.fileName || '',
+        batchId: batch?.id || '',
+        batchName: batch?.name || '',
+        batchSection: batch?.section || '',
+        assigneeId: assignee?.id || '',
+        assigneeName: assignee?.name || '',
+        status: getStatusText(annotation.status),
+        statusCode: annotation.status,
+        boxCount: annotation.boxes.length,
+        boxes: annotation.boxes.map(box => ({
+          category: box.category,
+          categoryName: box.categoryName,
+          x: box.x,
+          y: box.y,
+          width: box.width,
+          height: box.height,
+          properties: box.properties,
+        })),
+        createdAt: annotation.createdAt,
+        updatedAt: annotation.updatedAt,
+      };
+    });
 
     if (format === 'json') {
       downloadJSON(exportData, 'annotations.json');
     } else {
-      downloadCSV(exportData.flatMap(a => 
-        a.boxes.map(box => ({
-          annotationId: a.id,
-          imageId: a.imageId,
-          category: box.category,
+      const csvData = exportData.flatMap(annotation => 
+        annotation.boxes.map(box => ({
+          annotationId: annotation.id,
+          imageId: annotation.imageId,
+          imageName: annotation.imageName,
+          batchName: annotation.batchName,
+          batchSection: annotation.batchSection,
+          assigneeName: annotation.assigneeName,
+          status: annotation.status,
+          category: box.categoryName,
           x: box.x,
           y: box.y,
           width: box.width,
           height: box.height,
           ...box.properties,
         }))
-      ), 'annotations.csv');
+      );
+      downloadCSV(csvData, 'annotations.csv');
     }
-    setShowExportModal(false);
   };
 
   const handleExportIssues = () => {
     downloadJSON(qualityIssues, 'quality_issues.json');
-    setShowExportModal(false);
   };
 
   return (
@@ -212,14 +269,17 @@ export const ReviewList = ({ onNavigate, currentPath }: ReviewListProps) => {
           >
             质量抽查
           </button>
+          <button
+            onClick={() => setActiveTab('export')}
+            className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+              activeTab === 'export' 
+                ? 'bg-primary-600 text-white' 
+                : 'text-gray-600 hover:bg-gray-100'
+            }`}
+          >
+            数据导出
+          </button>
         </div>
-        
-        {(user?.role === 'admin' || user?.role === 'reviewer') && (
-          <Button onClick={() => setShowExportModal(true)}>
-            <Download className="w-4 h-4" />
-            导出数据
-          </Button>
-        )}
       </div>
 
       {activeTab === 'review' && (
@@ -232,7 +292,7 @@ export const ReviewList = ({ onNavigate, currentPath }: ReviewListProps) => {
                   type="text"
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
-                  placeholder="搜索图片名称..."
+                  placeholder="搜索图片名称、批次或标注员..."
                   className="pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 w-64"
                 />
               </div>
@@ -246,18 +306,6 @@ export const ReviewList = ({ onNavigate, currentPath }: ReviewListProps) => {
                 筛选
                 <ChevronDown className={`w-4 h-4 transition-transform ${showFilters ? 'rotate-180' : ''}`} />
               </button>
-              {showFilters && (
-                <select
-                  value={selectedStatus}
-                  onChange={(e) => setSelectedStatus(e.target.value)}
-                  className="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
-                >
-                  <option value="">全部状态</option>
-                  <option value="draft">草稿</option>
-                  <option value="submitted">待审核</option>
-                  <option value="reviewed">已通过</option>
-                </select>
-              )}
             </div>
             <div className="flex items-center gap-4 text-sm">
               <span className="text-gray-500">待审核: <span className="font-medium text-blue-600">{pendingAnnotations.length}</span></span>
@@ -266,11 +314,71 @@ export const ReviewList = ({ onNavigate, currentPath }: ReviewListProps) => {
             </div>
           </div>
 
+          {showFilters && (
+            <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-4 mb-6">
+              <div className="flex flex-wrap gap-4">
+                <div className="flex items-center gap-2">
+                  <span className="text-sm text-gray-600">状态:</span>
+                  <select
+                    value={selectedStatus}
+                    onChange={(e) => setSelectedStatus(e.target.value)}
+                    className="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+                  >
+                    <option value="">全部状态</option>
+                    <option value="draft">草稿</option>
+                    <option value="submitted">待审核</option>
+                    <option value="reviewed">已通过</option>
+                  </select>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-sm text-gray-600">批次:</span>
+                  <select
+                    value={selectedBatch}
+                    onChange={(e) => setSelectedBatch(e.target.value)}
+                    className="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+                  >
+                    <option value="">全部批次</option>
+                    {batches.map(batch => (
+                      <option key={batch.id} value={batch.id}>{batch.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-sm text-gray-600">标注员:</span>
+                  <select
+                    value={selectedAnnotator}
+                    onChange={(e) => setSelectedAnnotator(e.target.value)}
+                    className="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+                  >
+                    <option value="">全部标注员</option>
+                    {annotators.map(annotator => (
+                      <option key={annotator.id} value={annotator.id}>{annotator.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <Button 
+                  variant="secondary" 
+                  onClick={() => {
+                    setSelectedStatus('');
+                    setSelectedBatch('');
+                    setSelectedAnnotator('');
+                  }}
+                >
+                  重置筛选
+                </Button>
+              </div>
+            </div>
+          )}
+
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {filteredAnnotations.map((annotation) => {
               const image = images.find(i => i.id === annotation.imageId);
-              const review = reviews.find(r => r.annotationId === annotation.id);
-              const reviewer = review ? users.find(u => u.id === review.reviewerId) : null;
+              const task = tasks.find(t => t.id === annotation.taskId);
+              const batch = batches.find(b => b.id === task?.batchId);
+              const assignee = users.find(u => u.id === task?.assigneeId);
+              const allReviews = getReviewsForAnnotation(annotation.id);
+              const latestReview = allReviews[0];
+              const reviewer = latestReview ? users.find(u => u.id === latestReview.reviewerId) : null;
               
               return (
                 <div 
@@ -292,12 +400,30 @@ export const ReviewList = ({ onNavigate, currentPath }: ReviewListProps) => {
                       <p className="font-medium text-gray-800 truncate">{image?.fileName}</p>
                       <span className="text-sm text-gray-500">{annotation.boxes.length} 个标注</span>
                     </div>
-                    {review && (
-                      <div className="text-xs text-gray-500 mb-3">
-                        审核人: {reviewer?.name} | {review.createdAt}
-                        {review.comments && (
-                          <div className="mt-1">意见: {review.comments}</div>
-                        )}
+                    <div className="flex items-center gap-2 text-xs text-gray-500 mb-2">
+                      <span>{batch?.name}</span>
+                      <span>·</span>
+                      <span>{assignee?.name}</span>
+                    </div>
+                    {allReviews.length > 0 && (
+                      <div className="mb-3">
+                        <p className="text-xs text-gray-500 mb-1">审核记录 ({allReviews.length})</p>
+                        <div className="flex items-center gap-2 text-xs text-gray-600">
+                          <Clock className="w-3 h-3" />
+                          <span>{latestReview?.createdAt}</span>
+                          <span>·</span>
+                          <span>{reviewer?.name}</span>
+                          <span>·</span>
+                          <span className={latestReview?.result === 'approved' ? 'text-green-500' : 'text-red-500'}>
+                            {latestReview?.result === 'approved' ? '已通过' : '已退回'}
+                          </span>
+                          {annotation.status === 'draft' && latestReview?.result === 'rejected' && (
+                            <>
+                              <span>·</span>
+                              <span className="text-red-500">{latestReview.comments}</span>
+                            </>
+                          )}
+                        </div>
                       </div>
                     )}
                     <div className="flex items-center justify-end gap-2">
@@ -477,7 +603,7 @@ export const ReviewList = ({ onNavigate, currentPath }: ReviewListProps) => {
                 随机抽查
               </h3>
               <Button variant="secondary">
-                <Shuffle className="w-4 h-4" />
+                <RefreshCw className="w-4 h-4" />
                 重新抽取
               </Button>
             </div>
@@ -485,6 +611,9 @@ export const ReviewList = ({ onNavigate, currentPath }: ReviewListProps) => {
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               {sampleAnnotations.map((annotation) => {
                 const image = images.find(i => i.id === annotation.imageId);
+                const task = tasks.find(t => t.id === annotation.taskId);
+                const batch = batches.find(b => b.id === task?.batchId);
+                const assignee = users.find(u => u.id === task?.assigneeId);
                 return (
                   <div 
                     key={annotation.id}
@@ -496,7 +625,7 @@ export const ReviewList = ({ onNavigate, currentPath }: ReviewListProps) => {
                       className="w-full h-32 object-cover rounded-lg mb-3"
                     />
                     <p className="text-sm font-medium text-gray-800 mb-1">{image?.fileName}</p>
-                    <p className="text-xs text-gray-500">{annotation.boxes.length} 个标注</p>
+                    <p className="text-xs text-gray-500 mb-2">{batch?.name} · {assignee?.name}</p>
                     <button 
                       onClick={() => {
                         setSelectedAnnotation(annotation.id);
@@ -536,6 +665,113 @@ export const ReviewList = ({ onNavigate, currentPath }: ReviewListProps) => {
         </div>
       )}
 
+      {activeTab === 'export' && (
+        <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-6">
+          <h3 className="font-semibold text-gray-800 mb-6">数据导出</h3>
+          
+          <div className="mb-6">
+            <h4 className="text-sm font-medium text-gray-700 mb-4">筛选条件</h4>
+            <div className="flex flex-wrap gap-4">
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-gray-600">状态:</span>
+                <select
+                  value={selectedStatus}
+                  onChange={(e) => setSelectedStatus(e.target.value)}
+                  className="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+                >
+                  <option value="">全部状态</option>
+                  <option value="draft">草稿</option>
+                  <option value="submitted">待审核</option>
+                  <option value="reviewed">已通过</option>
+                </select>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-gray-600">批次:</span>
+                <select
+                  value={selectedBatch}
+                  onChange={(e) => setSelectedBatch(e.target.value)}
+                  className="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+                >
+                  <option value="">全部批次</option>
+                  {batches.map(batch => (
+                    <option key={batch.id} value={batch.id}>{batch.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-sm text-gray-600">标注员:</span>
+                <select
+                  value={selectedAnnotator}
+                  onChange={(e) => setSelectedAnnotator(e.target.value)}
+                  className="px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+                >
+                  <option value="">全部标注员</option>
+                  {annotators.map(annotator => (
+                    <option key={annotator.id} value={annotator.id}>{annotator.name}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <div className="mb-6 p-4 bg-blue-50 rounded-lg">
+            <p className="text-sm text-blue-700">
+              当前筛选条件下共有 <span className="font-medium">{filteredAnnotations.length}</span> 条标注记录
+            </p>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <button
+              onClick={() => handleExport('json')}
+              className="flex items-center justify-center gap-3 p-4 border-2 border-gray-200 rounded-xl hover:border-primary-500 hover:bg-primary-50 transition-colors"
+            >
+              <div className="w-12 h-12 bg-gray-100 rounded-lg flex items-center justify-center">
+                <FileJson className="w-6 h-6 text-gray-600" />
+              </div>
+              <div className="text-left">
+                <p className="font-medium text-gray-800">JSON 格式</p>
+                <p className="text-sm text-gray-500">包含完整标注信息和属性</p>
+              </div>
+            </button>
+            <button
+              onClick={() => handleExport('csv')}
+              className="flex items-center justify-center gap-3 p-4 border-2 border-gray-200 rounded-xl hover:border-primary-500 hover:bg-primary-50 transition-colors"
+            >
+              <div className="w-12 h-12 bg-gray-100 rounded-lg flex items-center justify-center">
+                <FileText className="w-6 h-6 text-gray-600" />
+              </div>
+              <div className="text-left">
+                <p className="font-medium text-gray-800">CSV 格式</p>
+                <p className="text-sm text-gray-500">适合表格处理和数据分析</p>
+              </div>
+            </button>
+            <button
+              onClick={handleExportIssues}
+              className="flex items-center justify-center gap-3 p-4 border-2 border-gray-200 rounded-xl hover:border-primary-500 hover:bg-primary-50 transition-colors"
+            >
+              <div className="w-12 h-12 bg-gray-100 rounded-lg flex items-center justify-center">
+                <AlertCircle className="w-6 h-6 text-gray-600" />
+              </div>
+              <div className="text-left">
+                <p className="font-medium text-gray-800">问题清单</p>
+                <p className="text-sm text-gray-500">质量问题汇总报告</p>
+              </div>
+            </button>
+          </div>
+
+          <div className="mt-6 p-4 bg-gray-50 rounded-lg">
+            <h4 className="font-medium text-gray-700 mb-2">导出字段说明</h4>
+            <ul className="text-sm text-gray-500 space-y-1">
+              <li>批次名: 数据批次名称</li>
+              <li>图片名: 图片文件名称</li>
+              <li>标注员: 负责标注的人员姓名</li>
+              <li>审核状态: 当前标注的审核状态</li>
+              <li>标注框信息: 类别、位置坐标、属性信息</li>
+            </ul>
+          </div>
+        </div>
+      )}
+
       <Modal 
         isOpen={showDetailModal}
         onClose={() => {
@@ -556,22 +792,38 @@ export const ReviewList = ({ onNavigate, currentPath }: ReviewListProps) => {
                   className="w-full rounded-lg"
                 />
               </div>
-              <div className="w-64">
+              <div className="w-80">
                 <h4 className="font-medium text-gray-800 mb-3">标注信息</h4>
                 <div className="space-y-2 text-sm">
-                  <div className="flex justify-between">
+                  <div className="flex justify-between py-2 border-b border-gray-100">
                     <span className="text-gray-500">图片名称</span>
                     <span className="text-gray-800">{getAnnotation(selectedAnnotation)?.image?.fileName}</span>
                   </div>
-                  <div className="flex justify-between">
+                  <div className="flex justify-between py-2 border-b border-gray-100">
+                    <span className="text-gray-500">所属批次</span>
+                    <span className="text-gray-800">{getAnnotation(selectedAnnotation)?.batch?.name}</span>
+                  </div>
+                  <div className="flex justify-between py-2 border-b border-gray-100">
+                    <span className="text-gray-500">路段</span>
+                    <span className="text-gray-800">{getAnnotation(selectedAnnotation)?.batch?.section}</span>
+                  </div>
+                  <div className="flex justify-between py-2 border-b border-gray-100">
+                    <span className="text-gray-500">标注员</span>
+                    <span className="text-gray-800">{getAnnotation(selectedAnnotation)?.assignee?.name}</span>
+                  </div>
+                  <div className="flex justify-between py-2 border-b border-gray-100">
                     <span className="text-gray-500">标注状态</span>
                     <span className={`px-2 py-1 text-xs rounded-full ${getStatusColor(getAnnotation(selectedAnnotation)?.status || '')}`}>
                       {getStatusText(getAnnotation(selectedAnnotation)?.status || '')}
                     </span>
                   </div>
-                  <div className="flex justify-between">
+                  <div className="flex justify-between py-2 border-b border-gray-100">
                     <span className="text-gray-500">标注数量</span>
                     <span className="text-gray-800">{getAnnotation(selectedAnnotation)?.boxes.length} 个</span>
+                  </div>
+                  <div className="flex justify-between py-2">
+                    <span className="text-gray-500">创建时间</span>
+                    <span className="text-gray-800">{formatDate(getAnnotation(selectedAnnotation)?.createdAt || '')}</span>
                   </div>
                 </div>
 
@@ -593,6 +845,39 @@ export const ReviewList = ({ onNavigate, currentPath }: ReviewListProps) => {
                   ))}
                 </div>
               </div>
+            </div>
+
+            <div className="pt-4 border-t border-gray-200">
+              <h4 className="font-medium text-gray-800 mb-3 flex items-center gap-2">
+                <Clock className="w-4 h-4" />
+                审核记录 ({getAnnotation(selectedAnnotation)?.allReviews.length || 0})
+              </h4>
+              {getAnnotation(selectedAnnotation)?.allReviews.length > 0 ? (
+                <div className="space-y-3">
+                  {getAnnotation(selectedAnnotation)?.allReviews.map((review, index) => {
+                    const reviewer = users.find(u => u.id === review.reviewerId);
+                    return (
+                      <div key={index} className="p-3 bg-gray-50 rounded-lg">
+                        <div className="flex items-center gap-3 mb-2">
+                          <span className={`px-2 py-1 text-xs rounded-full ${
+                            review.result === 'approved' 
+                              ? 'bg-green-100 text-green-600' 
+                              : 'bg-red-100 text-red-600'
+                          }`}>
+                            {review.result === 'approved' ? '审核通过' : '审核退回'}
+                          </span>
+                          <span className="text-sm text-gray-500">
+                            {reviewer?.name} · {formatDate(review.createdAt)}
+                          </span>
+                        </div>
+                        <p className="text-sm text-gray-600">{review.comments}</p>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <p className="text-sm text-gray-500">暂无审核记录</p>
+              )}
             </div>
 
             {getAnnotation(selectedAnnotation)?.status === 'submitted' && (
@@ -671,70 +956,8 @@ export const ReviewList = ({ onNavigate, currentPath }: ReviewListProps) => {
                 </div>
               </div>
             )}
-
-            {getAnnotation(selectedAnnotation)?.review && (
-              <div className="pt-4 border-t border-gray-200">
-                <h4 className="font-medium text-gray-800 mb-2">审核记录</h4>
-                <div className="p-3 bg-gray-50 rounded-lg">
-                  <div className="flex items-center gap-2 mb-2">
-                    <span className={`px-2 py-1 text-xs rounded-full ${
-                      getAnnotation(selectedAnnotation)?.review?.result === 'approved' 
-                        ? 'bg-green-100 text-green-600' 
-                        : 'bg-red-100 text-red-600'
-                    }`}>
-                      {getStatusText(getAnnotation(selectedAnnotation)?.review?.result === 'approved' ? 'reviewed' : 'rejected')}
-                    </span>
-                    <span className="text-sm text-gray-500">
-                      {users.find(u => u.id === getAnnotation(selectedAnnotation)?.review?.reviewerId)?.name}
-                    </span>
-                  </div>
-                  <p className="text-sm text-gray-600">{getAnnotation(selectedAnnotation)?.review?.comments}</p>
-                </div>
-              </div>
-            )}
           </div>
         )}
-      </Modal>
-
-      <Modal 
-        isOpen={showExportModal}
-        onClose={() => setShowExportModal(false)}
-        title="导出数据"
-      >
-        <div className="space-y-4">
-          <p className="text-gray-600">选择导出格式：</p>
-          <div className="space-y-3">
-            <Button 
-              variant="secondary" 
-              className="w-full justify-start"
-              onClick={() => handleExport('json')}
-            >
-              <Download className="w-4 h-4" />
-              JSON 格式
-            </Button>
-            <Button 
-              variant="secondary" 
-              className="w-full justify-start"
-              onClick={() => handleExport('csv')}
-            >
-              <Download className="w-4 h-4" />
-              CSV 格式
-            </Button>
-            <Button 
-              variant="secondary" 
-              className="w-full justify-start"
-              onClick={handleExportIssues}
-            >
-              <Download className="w-4 h-4" />
-              问题清单
-            </Button>
-          </div>
-          <div className="flex justify-end gap-3 mt-4">
-            <Button variant="secondary" onClick={() => setShowExportModal(false)}>
-              取消
-            </Button>
-          </div>
-        </div>
       </Modal>
     </Layout>
   );

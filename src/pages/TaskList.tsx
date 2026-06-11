@@ -7,7 +7,8 @@ import {
   User,
   ChevronDown,
   MoreHorizontal,
-  AlertCircle
+  AlertCircle,
+  Edit3
 } from 'lucide-react';
 import { Layout } from '../components/Layout/Layout';
 import { Button } from '../components/Common/Button';
@@ -21,7 +22,7 @@ interface TaskListProps {
 }
 
 export const TaskList = ({ onNavigate, currentPath }: TaskListProps) => {
-  const { tasks, batches, users, addTask, updateTask, user } = useStore();
+  const { tasks, batches, users, addTask, updateTask, user, setCurrentTask, setCurrentImageId, annotations, images, getRejectedImages } = useStore();
   const [searchTerm, setSearchTerm] = useState('');
   const [showFilters, setShowFilters] = useState(false);
   const [selectedStatus, setSelectedStatus] = useState('');
@@ -38,6 +39,33 @@ export const TaskList = ({ onNavigate, currentPath }: TaskListProps) => {
   });
 
   const availableAnnotators = users.filter(u => u.role === 'annotator' || u.role === 'admin');
+  
+  const handleOpenWorkbench = (taskId: string) => {
+    const task = tasks.find(t => t.id === taskId);
+    if (task) {
+      setCurrentTask(task);
+      
+      const taskImages = images.filter(img => img.batchId === task.batchId);
+      const rejectedImages = getRejectedImages(taskId);
+      
+      if (rejectedImages.length > 0) {
+        setCurrentImageId(rejectedImages[0]);
+      } else {
+        const inProgressImage = taskImages.find(img => {
+          const annotation = annotations.find(a => a.imageId === img.id);
+          return annotation?.status === 'draft' && annotation.boxes.length > 0;
+        });
+        
+        if (inProgressImage) {
+          setCurrentImageId(inProgressImage.id);
+        } else {
+          setCurrentImageId(taskImages[0]?.id || null);
+        }
+      }
+      
+      onNavigate('/workbench');
+    }
+  };
 
   const filteredTasks = tasks.filter(task => {
     const batch = batches.find(b => b.id === task.batchId);
