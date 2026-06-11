@@ -12,7 +12,7 @@ import {
 import { Layout } from '../components/Layout/Layout';
 import { Button } from '../components/Common/Button';
 import { Modal } from '../components/Common/Modal';
-import { mockBatches, mockUsers } from '../data/mockData';
+import { useStore } from '../store';
 import { formatDate } from '../utils/helpers';
 
 interface BatchListProps {
@@ -21,6 +21,7 @@ interface BatchListProps {
 }
 
 export const BatchList = ({ onNavigate, currentPath }: BatchListProps) => {
+  const { batches, addBatch, deleteBatch, user } = useStore();
   const [searchTerm, setSearchTerm] = useState('');
   const [showFilters, setShowFilters] = useState(false);
   const [selectedSection, setSelectedSection] = useState('');
@@ -33,11 +34,12 @@ export const BatchList = ({ onNavigate, currentPath }: BatchListProps) => {
     section: '',
     collectionDate: '',
     description: '',
+    imageCount: 0,
   });
 
-  const sections = [...new Set(mockBatches.map(b => b.section))];
+  const sections = [...new Set(batches.map(b => b.section))];
 
-  const filteredBatches = mockBatches.filter(batch => {
+  const filteredBatches = batches.filter(batch => {
     const matchesSearch = batch.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
       batch.section.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesSection = !selectedSection || batch.section === selectedSection;
@@ -46,11 +48,22 @@ export const BatchList = ({ onNavigate, currentPath }: BatchListProps) => {
   });
 
   const handleCreate = () => {
+    addBatch({
+      name: formData.name,
+      section: formData.section,
+      collectionDate: formData.collectionDate,
+      description: formData.description,
+      imageCount: formData.imageCount || Math.floor(Math.random() * 100) + 50,
+      createdBy: user?.id || '',
+    });
     setShowCreateModal(false);
-    setFormData({ name: '', section: '', collectionDate: '', description: '' });
+    setFormData({ name: '', section: '', collectionDate: '', description: '', imageCount: 0 });
   };
 
   const handleDelete = () => {
+    if (deletingBatch) {
+      deleteBatch(deletingBatch);
+    }
     setShowDeleteModal(false);
     setDeletingBatch(null);
   };
@@ -130,50 +143,47 @@ export const BatchList = ({ onNavigate, currentPath }: BatchListProps) => {
       )}
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {filteredBatches.map((batch) => {
-          const creator = mockUsers.find(u => u.id === batch.createdBy);
-          return (
-            <div 
-              key={batch.id}
-              className="bg-white rounded-xl shadow-sm border border-gray-100 p-5 hover:shadow-md transition-shadow"
-            >
-              <div className="flex items-start justify-between mb-3">
-                <h3 className="font-semibold text-gray-800 truncate flex-1 mr-2">{batch.name}</h3>
-                <div className="flex items-center gap-1">
-                  <button 
-                    onClick={() => onNavigate(`/batches/${batch.id}`)}
-                    className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
-                  >
-                    <Eye className="w-4 h-4 text-gray-500" />
-                  </button>
-                  <button 
-                    onClick={() => {
-                      setDeletingBatch(batch.id);
-                      setShowDeleteModal(true);
-                    }}
-                    className="p-2 hover:bg-red-50 rounded-lg transition-colors"
-                  >
-                    <Trash2 className="w-4 h-4 text-red-500" />
-                  </button>
-                </div>
-              </div>
-              <div className="space-y-2 text-sm">
-                <div className="flex items-center gap-2 text-gray-600">
-                  <MapPin className="w-4 h-4" />
-                  <span className="truncate">{batch.section}</span>
-                </div>
-                <div className="flex items-center gap-2 text-gray-600">
-                  <Calendar className="w-4 h-4" />
-                  <span>{formatDate(batch.collectionDate)}</span>
-                </div>
-                <div className="flex items-center justify-between pt-2 border-t border-gray-100">
-                  <span className="text-gray-500">{batch.imageCount} 张图片</span>
-                  <span className="text-gray-400 text-xs">创建者: {creator?.name}</span>
-                </div>
+        {filteredBatches.map((batch) => (
+          <div 
+            key={batch.id}
+            className="bg-white rounded-xl shadow-sm border border-gray-100 p-5 hover:shadow-md transition-shadow"
+          >
+            <div className="flex items-start justify-between mb-3">
+              <h3 className="font-semibold text-gray-800 truncate flex-1 mr-2">{batch.name}</h3>
+              <div className="flex items-center gap-1">
+                <button 
+                  onClick={() => onNavigate(`/batches/${batch.id}`)}
+                  className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                >
+                  <Eye className="w-4 h-4 text-gray-500" />
+                </button>
+                <button 
+                  onClick={() => {
+                    setDeletingBatch(batch.id);
+                    setShowDeleteModal(true);
+                  }}
+                  className="p-2 hover:bg-red-50 rounded-lg transition-colors"
+                >
+                  <Trash2 className="w-4 h-4 text-red-500" />
+                </button>
               </div>
             </div>
-          );
-        })}
+            <div className="space-y-2 text-sm">
+              <div className="flex items-center gap-2 text-gray-600">
+                <MapPin className="w-4 h-4" />
+                <span className="truncate">{batch.section}</span>
+              </div>
+              <div className="flex items-center gap-2 text-gray-600">
+                <Calendar className="w-4 h-4" />
+                <span>{formatDate(batch.collectionDate)}</span>
+              </div>
+              <div className="flex items-center justify-between pt-2 border-t border-gray-100">
+                <span className="text-gray-500">{batch.imageCount} 张图片</span>
+                <span className="text-gray-400 text-xs">创建于 {formatDate(batch.createdAt)}</span>
+              </div>
+            </div>
+          </div>
+        ))}
       </div>
 
       {filteredBatches.length === 0 && (
@@ -229,6 +239,16 @@ export const BatchList = ({ onNavigate, currentPath }: BatchListProps) => {
               className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 resize-none"
               rows={3}
               placeholder="输入批次描述"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">图片数量</label>
+            <input
+              type="number"
+              value={formData.imageCount}
+              onChange={(e) => setFormData({ ...formData, imageCount: parseInt(e.target.value) || 0 })}
+              className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
+              placeholder="输入图片数量"
             />
           </div>
           <div>

@@ -10,9 +10,8 @@ import {
 import { Layout } from '../components/Layout/Layout';
 import { Button } from '../components/Common/Button';
 import { Modal } from '../components/Common/Modal';
-import { mockUsers, mockTasks, mockAnnotations } from '../data/mockData';
-import { getRoleText, getRoleColor, formatDate } from '../utils/helpers';
 import { useStore } from '../store';
+import { getRoleText, getRoleColor, formatDate } from '../utils/helpers';
 
 interface MemberListProps {
   onNavigate: (path: string) => void;
@@ -20,7 +19,7 @@ interface MemberListProps {
 }
 
 export const MemberList = ({ onNavigate, currentPath }: MemberListProps) => {
-  const { user } = useStore();
+  const { users, tasks, annotations, addUser, updateUser, deleteUser, user, setUser } = useStore();
   const [searchTerm, setSearchTerm] = useState('');
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
@@ -32,46 +31,62 @@ export const MemberList = ({ onNavigate, currentPath }: MemberListProps) => {
     role: 'annotator' as 'admin' | 'annotator' | 'reviewer',
   });
 
-  const filteredUsers = mockUsers.filter(user => 
-    user.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    user.email.toLowerCase().includes(searchTerm.toLowerCase())
+  const filteredUsers = users.filter(userItem => 
+    userItem.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    userItem.email.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
   const getUserStats = (userId: string) => {
-    const tasks = mockTasks.filter(t => t.assigneeId === userId);
-    const annotations = mockAnnotations.filter(a => {
-      const task = mockTasks.find(t => t.id === a.taskId);
+    const userTasks = tasks.filter(t => t.assigneeId === userId);
+    const userAnnotations = annotations.filter(a => {
+      const task = tasks.find(t => t.id === a.taskId);
       return task?.assigneeId === userId;
     });
     return {
-      totalTasks: tasks.length,
-      completedTasks: tasks.filter(t => t.status === 'completed').length,
-      totalAnnotations: annotations.length,
+      totalTasks: userTasks.length,
+      completedTasks: userTasks.filter(t => t.status === 'completed').length,
+      totalAnnotations: userAnnotations.length,
     };
   };
 
   const handleCreate = () => {
+    addUser({
+      name: formData.name,
+      email: formData.email,
+      role: formData.role,
+    });
     setShowCreateModal(false);
     setFormData({ name: '', email: '', role: 'annotator' });
-    alert('成员已创建');
   };
 
   const handleEdit = () => {
+    if (selectedUser) {
+      updateUser(selectedUser, {
+        name: formData.name,
+        email: formData.email,
+        role: formData.role,
+      });
+      
+      if (selectedUser === user?.id && formData.role !== user.role) {
+        setUser({ ...user, role: formData.role });
+      }
+    }
     setShowEditModal(false);
     setSelectedUser(null);
     setFormData({ name: '', email: '', role: 'annotator' });
-    alert('成员信息已更新');
   };
 
   const handleDelete = () => {
+    if (selectedUser && selectedUser !== user?.id) {
+      deleteUser(selectedUser);
+    }
     setShowDeleteModal(false);
     setSelectedUser(null);
-    alert('成员已删除');
   };
 
-  const getSelectedUser = () => {
+  const getSelectedUserObj = () => {
     if (!selectedUser) return null;
-    return mockUsers.find(u => u.id === selectedUser);
+    return users.find(u => u.id === selectedUser);
   };
 
   if (user?.role !== 'admin') {
@@ -118,26 +133,33 @@ export const MemberList = ({ onNavigate, currentPath }: MemberListProps) => {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {filteredUsers.map((user) => {
-          const stats = getUserStats(user.id);
+        {filteredUsers.map((userItem) => {
+          const stats = getUserStats(userItem.id);
+          const isCurrentUser = userItem.id === user?.id;
+          
           return (
             <div 
-              key={user.id}
+              key={userItem.id}
               className="bg-white rounded-xl shadow-sm border border-gray-100 p-5 hover:shadow-md transition-shadow"
             >
               <div className="flex items-start gap-4 mb-4">
                 <div className="w-12 h-12 bg-primary-100 rounded-full flex items-center justify-center text-lg font-bold text-primary-600">
-                  {user.name.charAt(0)}
+                  {userItem.name.charAt(0)}
                 </div>
                 <div className="flex-1">
-                  <h3 className="font-semibold text-gray-800">{user.name}</h3>
+                  <div className="flex items-center gap-2">
+                    <h3 className="font-semibold text-gray-800">{userItem.name}</h3>
+                    {isCurrentUser && (
+                      <span className="px-2 py-0.5 text-xs bg-blue-100 text-blue-600 rounded-full">当前用户</span>
+                    )}
+                  </div>
                   <div className="flex items-center gap-2 text-sm text-gray-500">
                     <Mail className="w-3 h-3" />
-                    <span className="truncate">{user.email}</span>
+                    <span className="truncate">{userItem.email}</span>
                   </div>
                 </div>
-                <span className={`px-2 py-1 text-xs font-medium rounded-full ${getRoleColor(user.role)}`}>
-                  {getRoleText(user.role)}
+                <span className={`px-2 py-1 text-xs font-medium rounded-full ${getRoleColor(userItem.role)}`}>
+                  {getRoleText(userItem.role)}
                 </span>
               </div>
               
@@ -159,8 +181,8 @@ export const MemberList = ({ onNavigate, currentPath }: MemberListProps) => {
               <div className="flex items-center justify-end gap-2 pt-4 border-t border-gray-100">
                 <button
                   onClick={() => {
-                    setSelectedUser(user.id);
-                    setFormData({ name: user.name, email: user.email, role: user.role });
+                    setSelectedUser(userItem.id);
+                    setFormData({ name: userItem.name, email: userItem.email, role: userItem.role });
                     setShowEditModal(true);
                   }}
                   className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
@@ -169,12 +191,17 @@ export const MemberList = ({ onNavigate, currentPath }: MemberListProps) => {
                 </button>
                 <button
                   onClick={() => {
-                    setSelectedUser(user.id);
-                    setShowDeleteModal(true);
+                    if (!isCurrentUser) {
+                      setSelectedUser(userItem.id);
+                      setShowDeleteModal(true);
+                    }
                   }}
-                  className="p-2 hover:bg-red-50 rounded-lg transition-colors"
+                  disabled={isCurrentUser}
+                  className={`p-2 rounded-lg transition-colors ${
+                    isCurrentUser ? 'opacity-50 cursor-not-allowed' : 'hover:bg-red-50'
+                  }`}
                 >
-                  <Trash2 className="w-4 h-4 text-red-500" />
+                  <Trash2 className={`w-4 h-4 ${isCurrentUser ? 'text-gray-300' : 'text-red-500'}`} />
                 </button>
               </div>
             </div>
@@ -248,7 +275,7 @@ export const MemberList = ({ onNavigate, currentPath }: MemberListProps) => {
         }}
         title="编辑成员信息"
       >
-        {getSelectedUser() && (
+        {getSelectedUserObj() && (
           <form className="space-y-4">
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-1">姓名 *</label>
@@ -304,7 +331,7 @@ export const MemberList = ({ onNavigate, currentPath }: MemberListProps) => {
         title="确认删除"
       >
         <div className="space-y-4">
-          <p className="text-gray-600">确定要删除成员 <span className="font-medium">{getSelectedUser()?.name}</span> 吗？</p>
+          <p className="text-gray-600">确定要删除成员 <span className="font-medium">{getSelectedUserObj()?.name}</span> 吗？</p>
           <p className="text-sm text-gray-500">此操作将删除该成员的所有关联数据，且无法撤销。</p>
           <div className="flex justify-end gap-3">
             <Button variant="secondary" onClick={() => {

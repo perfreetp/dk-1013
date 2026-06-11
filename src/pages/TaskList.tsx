@@ -11,9 +11,8 @@ import {
 import { Layout } from '../components/Layout/Layout';
 import { Button } from '../components/Common/Button';
 import { Modal } from '../components/Common/Modal';
-import { mockTasks, mockBatches, mockUsers } from '../data/mockData';
-import { getStatusText, getStatusColor, formatDate } from '../utils/helpers';
 import { useStore } from '../store';
+import { getStatusText, getStatusColor, formatDate } from '../utils/helpers';
 
 interface TaskListProps {
   onNavigate: (path: string) => void;
@@ -21,7 +20,7 @@ interface TaskListProps {
 }
 
 export const TaskList = ({ onNavigate, currentPath }: TaskListProps) => {
-  const { user } = useStore();
+  const { tasks, batches, users, addTask, user } = useStore();
   const [searchTerm, setSearchTerm] = useState('');
   const [showFilters, setShowFilters] = useState(false);
   const [selectedStatus, setSelectedStatus] = useState('');
@@ -35,11 +34,11 @@ export const TaskList = ({ onNavigate, currentPath }: TaskListProps) => {
     deadline: '',
   });
 
-  const annotators = mockUsers.filter(u => u.role === 'annotator');
+  const annotators = users.filter(u => u.role === 'annotator');
 
-  const filteredTasks = mockTasks.filter(task => {
-    const batch = mockBatches.find(b => b.id === task.batchId);
-    const assignee = mockUsers.find(u => u.id === task.assigneeId);
+  const filteredTasks = tasks.filter(task => {
+    const batch = batches.find(b => b.id === task.batchId);
+    const assignee = users.find(u => u.id === task.assigneeId);
     const matchesSearch = batch?.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
       assignee?.name.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesStatus = !selectedStatus || task.status === selectedStatus;
@@ -52,18 +51,24 @@ export const TaskList = ({ onNavigate, currentPath }: TaskListProps) => {
   });
 
   const handleCreate = () => {
+    addTask({
+      batchId: formData.batchId,
+      assigneeId: formData.assigneeId,
+      deadline: formData.deadline,
+      status: 'pending',
+    });
     setShowCreateModal(false);
     setFormData({ batchId: '', assigneeId: '', deadline: '' });
   };
 
   const getTask = (id: string | null) => {
     if (!id) return null;
-    const task = mockTasks.find(t => t.id === id);
+    const task = tasks.find(t => t.id === id);
     if (!task) return null;
     return {
       ...task,
-      batch: mockBatches.find(b => b.id === task.batchId),
-      assignee: mockUsers.find(u => u.id === task.assigneeId),
+      batch: batches.find(b => b.id === task.batchId),
+      assignee: users.find(u => u.id === task.assigneeId),
     };
   };
 
@@ -170,8 +175,8 @@ export const TaskList = ({ onNavigate, currentPath }: TaskListProps) => {
           </thead>
           <tbody className="divide-y divide-gray-100">
             {filteredTasks.map((task) => {
-              const batch = mockBatches.find(b => b.id === task.batchId);
-              const assignee = mockUsers.find(u => u.id === task.assigneeId);
+              const batch = batches.find(b => b.id === task.batchId);
+              const assignee = users.find(u => u.id === task.assigneeId);
               return (
                 <tr key={task.id} className="hover:bg-gray-50 transition-colors">
                   <td className="px-6 py-4">
@@ -239,7 +244,7 @@ export const TaskList = ({ onNavigate, currentPath }: TaskListProps) => {
               className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500"
             >
               <option value="">请选择批次</option>
-              {mockBatches.map(batch => (
+              {batches.map(batch => (
                 <option key={batch.id} value={batch.id}>{batch.name}</option>
               ))}
             </select>

@@ -14,9 +14,8 @@ import {
 import { Layout } from '../components/Layout/Layout';
 import { Button } from '../components/Common/Button';
 import { Modal } from '../components/Common/Modal';
-import { mockAnnotations, mockReviews, mockImages, mockUsers, mockCategories } from '../data/mockData';
-import { getStatusText, getStatusColor, downloadJSON, downloadCSV } from '../utils/helpers';
 import { useStore } from '../store';
+import { getStatusText, getStatusColor, downloadJSON, downloadCSV } from '../utils/helpers';
 
 interface ReviewListProps {
   onNavigate: (path: string) => void;
@@ -24,7 +23,18 @@ interface ReviewListProps {
 }
 
 export const ReviewList = ({ onNavigate, currentPath }: ReviewListProps) => {
-  const { user } = useStore();
+  const { 
+    annotations, 
+    reviews, 
+    images, 
+    users, 
+    categories,
+    approveAnnotation, 
+    rejectAnnotation,
+    addReview,
+    user 
+  } = useStore();
+  
   const [activeTab, setActiveTab] = useState<'review' | 'statistics' | 'audit'>('review');
   const [searchTerm, setSearchTerm] = useState('');
   const [showFilters, setShowFilters] = useState(false);
@@ -33,12 +43,13 @@ export const ReviewList = ({ onNavigate, currentPath }: ReviewListProps) => {
   const [selectedAnnotation, setSelectedAnnotation] = useState<string | null>(null);
   const [reviewComment, setReviewComment] = useState('');
   const [showExportModal, setShowExportModal] = useState(false);
+  const [reviewAction, setReviewAction] = useState<'approve' | 'reject'>('approve');
 
-  const pendingAnnotations = mockAnnotations.filter(a => a.status === 'submitted');
-  const reviewedAnnotations = mockAnnotations.filter(a => a.status === 'reviewed' || a.status === 'rejected');
+  const pendingAnnotations = annotations.filter(a => a.status === 'submitted');
+  const reviewedAnnotations = annotations.filter(a => a.status === 'reviewed' || a.status === 'rejected');
 
   const filteredAnnotations = [...pendingAnnotations, ...reviewedAnnotations].filter(annotation => {
-    const image = mockImages.find(i => i.id === annotation.imageId);
+    const image = images.find(i => i.id === annotation.imageId);
     const matchesSearch = image?.fileName.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesStatus = !selectedStatus || annotation.status === selectedStatus;
     return matchesSearch && matchesStatus;
@@ -46,46 +57,57 @@ export const ReviewList = ({ onNavigate, currentPath }: ReviewListProps) => {
 
   const getAnnotation = (id: string | null) => {
     if (!id) return null;
-    const annotation = mockAnnotations.find(a => a.id === id);
+    const annotation = annotations.find(a => a.id === id);
     if (!annotation) return null;
     return {
       ...annotation,
-      image: mockImages.find(i => i.id === annotation.imageId),
-      review: mockReviews.find(r => r.annotationId === annotation.id),
+      image: images.find(i => i.id === annotation.imageId),
+      review: reviews.find(r => r.annotationId === annotation.id),
     };
   };
 
   const handleApprove = () => {
+    if (selectedAnnotation) {
+      approveAnnotation(selectedAnnotation);
+      addReview({
+        annotationId: selectedAnnotation,
+        reviewerId: user?.id || '',
+        result: 'approved',
+        comments: reviewComment,
+      });
+    }
     setShowDetailModal(false);
     setSelectedAnnotation(null);
     setReviewComment('');
-    alert('标注已审核通过');
   };
 
   const handleReject = () => {
+    if (selectedAnnotation && reviewComment) {
+      rejectAnnotation(selectedAnnotation, reviewComment);
+    }
     setShowDetailModal(false);
     setSelectedAnnotation(null);
     setReviewComment('');
-    alert('标注已退回修改');
   };
 
-  const categoryStats = mockCategories.map(category => {
-    const count = mockAnnotations.reduce((sum, annotation) => {
+  const categoryStats = categories.map(category => {
+    const count = annotations.reduce((sum, annotation) => {
       return sum + annotation.boxes.filter(box => box.category === category.code).length;
     }, 0);
     return { category: category.name, count };
   });
 
-  const userStats = mockUsers.map(user => {
-    const annotations = mockAnnotations.filter(a => {
-      const task = mockReviews.find(r => r.annotationId === a.id);
-      return task?.reviewerId === user.id;
+  const userStats = users.map(userItem => {
+    const userReviews = reviews.filter(r => r.reviewerId === userItem.id);
+    const reviewed = annotations.filter(a => {
+      const review = reviews.find(r => r.annotationId === a.id);
+      return review?.reviewerId === userItem.id;
     });
     return {
-      name: user.name,
-      reviewed: annotations.length,
-      approved: annotations.filter(a => a.status === 'reviewed').length,
-      rejected: annotations.filter(a => a.status === 'rejected').length,
+      name: userItem.name,
+      reviewed: reviewed.length,
+      approved: userReviews.filter(r => r.result === 'approved').length,
+      rejected: userReviews.filter(r => r.result === 'rejected').length,
     };
   }).filter(u => u.reviewed > 0);
 
@@ -97,10 +119,10 @@ export const ReviewList = ({ onNavigate, currentPath }: ReviewListProps) => {
     { id: '5', description: '标注框过大包含无关内容', severity: 'low' },
   ];
 
-  const sampleAnnotations = [...mockAnnotations].sort(() => Math.random() - 0.5).slice(0, 3);
+  const sampleAnnotations = [...annotations].sort(() => Math.random() - 0.5).slice(0, 3);
 
   const handleExport = (format: 'json' | 'csv') => {
-    const exportData = mockAnnotations.map(a => ({
+    const exportData = annotations.map(a => ({
       id: a.id,
       imageId: a.imageId,
       status: getStatusText(a.status),
@@ -230,9 +252,9 @@ export const ReviewList = ({ onNavigate, currentPath }: ReviewListProps) => {
 
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {filteredAnnotations.map((annotation) => {
-              const image = mockImages.find(i => i.id === annotation.imageId);
-              const review = mockReviews.find(r => r.annotationId === annotation.id);
-              const reviewer = review ? mockUsers.find(u => u.id === review.reviewerId) : null;
+              const image = images.find(i => i.id === annotation.imageId);
+              const review = reviews.find(r => r.annotationId === annotation.id);
+              const reviewer = review ? users.find(u => u.id === review.reviewerId) : null;
               
               return (
                 <div 
@@ -274,7 +296,11 @@ export const ReviewList = ({ onNavigate, currentPath }: ReviewListProps) => {
                           <Button 
                             variant="success" 
                             size="sm"
-                            onClick={handleApprove}
+                            onClick={() => {
+                              setSelectedAnnotation(annotation.id);
+                              setReviewAction('approve');
+                              setShowDetailModal(true);
+                            }}
                           >
                             <Check className="w-4 h-4" />
                             通过
@@ -284,6 +310,7 @@ export const ReviewList = ({ onNavigate, currentPath }: ReviewListProps) => {
                             size="sm"
                             onClick={() => {
                               setSelectedAnnotation(annotation.id);
+                              setReviewAction('reject');
                               setShowDetailModal(true);
                             }}
                           >
@@ -313,23 +340,23 @@ export const ReviewList = ({ onNavigate, currentPath }: ReviewListProps) => {
             <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
               <p className="text-sm text-gray-500 mb-1">标注总数</p>
               <p className="text-2xl font-bold text-gray-800">
-                {mockAnnotations.reduce((sum, a) => sum + a.boxes.length, 0)}
+                {annotations.reduce((sum, a) => sum + a.boxes.length, 0)}
               </p>
             </div>
             <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
               <p className="text-sm text-gray-500 mb-1">图片数量</p>
-              <p className="text-2xl font-bold text-gray-800">{mockImages.length}</p>
+              <p className="text-2xl font-bold text-gray-800">{images.length}</p>
             </div>
             <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
               <p className="text-sm text-gray-500 mb-1">审核通过</p>
               <p className="text-2xl font-bold text-green-600">
-                {mockAnnotations.filter(a => a.status === 'reviewed').length}
+                {annotations.filter(a => a.status === 'reviewed').length}
               </p>
             </div>
             <div className="bg-white rounded-xl shadow-sm border border-gray-100 p-5">
               <p className="text-sm text-gray-500 mb-1">审核退回</p>
               <p className="text-2xl font-bold text-red-600">
-                {mockAnnotations.filter(a => a.status === 'rejected').length}
+                {annotations.filter(a => a.status === 'rejected').length}
               </p>
             </div>
           </div>
@@ -368,20 +395,20 @@ export const ReviewList = ({ onNavigate, currentPath }: ReviewListProps) => {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-gray-100">
-                    {userStats.map((user, index) => (
+                    {userStats.map((userItem, index) => (
                       <tr key={index}>
-                        <td className="py-2">{user.name}</td>
-                        <td className="py-2">{user.reviewed}</td>
+                        <td className="py-2">{userItem.name}</td>
+                        <td className="py-2">{userItem.reviewed}</td>
                         <td className="py-2">
                           <div className="flex items-center gap-2">
                             <div className="w-20 h-2 bg-gray-100 rounded-full overflow-hidden">
                               <div 
                                 className="h-full bg-green-500 rounded-full"
-                                style={{ width: `${(user.approved / user.reviewed) * 100}%` }}
+                                style={{ width: `${userItem.reviewed > 0 ? (userItem.approved / userItem.reviewed) * 100 : 0}%` }}
                               />
                             </div>
                             <span className="text-sm text-gray-600">
-                              {Math.round((user.approved / user.reviewed) * 100)}%
+                              {userItem.reviewed > 0 ? Math.round((userItem.approved / userItem.reviewed) * 100) : 0}%
                             </span>
                           </div>
                         </td>
@@ -438,7 +465,7 @@ export const ReviewList = ({ onNavigate, currentPath }: ReviewListProps) => {
             
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               {sampleAnnotations.map((annotation) => {
-                const image = mockImages.find(i => i.id === annotation.imageId);
+                const image = images.find(i => i.id === annotation.imageId);
                 return (
                   <div 
                     key={annotation.id}
@@ -470,7 +497,11 @@ export const ReviewList = ({ onNavigate, currentPath }: ReviewListProps) => {
             <h3 className="font-semibold text-gray-800 mb-4">质量评估</h3>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div className="text-center p-4 bg-green-50 rounded-lg">
-                <div className="text-3xl font-bold text-green-600">92%</div>
+                <div className="text-3xl font-bold text-green-600">
+                  {annotations.filter(a => a.status === 'reviewed').length > 0 
+                    ? Math.round((annotations.filter(a => a.status === 'reviewed').length / annotations.length) * 100) 
+                    : 0}%
+                </div>
                 <div className="text-sm text-gray-600 mt-1">准确率</div>
               </div>
               <div className="text-center p-4 bg-blue-50 rounded-lg">
@@ -478,7 +509,7 @@ export const ReviewList = ({ onNavigate, currentPath }: ReviewListProps) => {
                 <div className="text-sm text-gray-600 mt-1">完整率</div>
               </div>
               <div className="text-center p-4 bg-yellow-50 rounded-lg">
-                <div className="text-3xl font-bold text-yellow-600">4</div>
+                <div className="text-3xl font-bold text-yellow-600">{annotations.filter(a => a.status === 'rejected').length}</div>
                 <div className="text-sm text-gray-600 mt-1">问题数量</div>
               </div>
             </div>
@@ -547,14 +578,42 @@ export const ReviewList = ({ onNavigate, currentPath }: ReviewListProps) => {
 
             {getAnnotation(selectedAnnotation)?.status === 'submitted' && (
               <div className="pt-4 border-t border-gray-200">
-                <label className="block text-sm font-medium text-gray-700 mb-2">审核意见</label>
-                <textarea
-                  value={reviewComment}
-                  onChange={(e) => setReviewComment(e.target.value)}
-                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 resize-none"
-                  rows={3}
-                  placeholder="请输入审核意见（退回时必填）"
-                />
+                <div className="flex items-center gap-4 mb-3">
+                  <button
+                    onClick={() => setReviewAction('approve')}
+                    className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors ${
+                      reviewAction === 'approve' 
+                        ? 'bg-green-500 text-white' 
+                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                    }`}
+                  >
+                    <Check className="w-4 h-4 inline mr-2" />
+                    审核通过
+                  </button>
+                  <button
+                    onClick={() => setReviewAction('reject')}
+                    className={`flex-1 py-2 rounded-lg text-sm font-medium transition-colors ${
+                      reviewAction === 'reject' 
+                        ? 'bg-red-500 text-white' 
+                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                    }`}
+                  >
+                    <X className="w-4 h-4 inline mr-2" />
+                    退回修改
+                  </button>
+                </div>
+                {reviewAction === 'reject' && (
+                  <div className="space-y-3">
+                    <label className="block text-sm font-medium text-gray-700">退回原因 *</label>
+                    <textarea
+                      value={reviewComment}
+                      onChange={(e) => setReviewComment(e.target.value)}
+                      className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 resize-none"
+                      rows={3}
+                      placeholder="请输入退回原因"
+                    />
+                  </div>
+                )}
                 <div className="flex justify-end gap-3 mt-4">
                   <Button variant="secondary" onClick={() => {
                     setShowDetailModal(false);
@@ -563,18 +622,21 @@ export const ReviewList = ({ onNavigate, currentPath }: ReviewListProps) => {
                   }}>
                     关闭
                   </Button>
-                  <Button 
-                    variant="danger" 
-                    onClick={handleReject}
-                    disabled={!reviewComment}
-                  >
-                    <X className="w-4 h-4" />
-                    退回修改
-                  </Button>
-                  <Button onClick={handleApprove}>
-                    <Check className="w-4 h-4" />
-                    审核通过
-                  </Button>
+                  {reviewAction === 'approve' ? (
+                    <Button onClick={handleApprove}>
+                      <Check className="w-4 h-4" />
+                      确认通过
+                    </Button>
+                  ) : (
+                    <Button 
+                      variant="danger" 
+                      onClick={handleReject}
+                      disabled={!reviewComment}
+                    >
+                      <X className="w-4 h-4" />
+                      确认退回
+                    </Button>
+                  )}
                 </div>
               </div>
             )}
@@ -592,7 +654,7 @@ export const ReviewList = ({ onNavigate, currentPath }: ReviewListProps) => {
                       {getStatusText(getAnnotation(selectedAnnotation)?.review?.result || '')}
                     </span>
                     <span className="text-sm text-gray-500">
-                      {mockUsers.find(u => u.id === getAnnotation(selectedAnnotation)?.review?.reviewerId)?.name}
+                      {users.find(u => u.id === getAnnotation(selectedAnnotation)?.review?.reviewerId)?.name}
                     </span>
                   </div>
                   <p className="text-sm text-gray-600">{getAnnotation(selectedAnnotation)?.review?.comments}</p>

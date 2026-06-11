@@ -8,9 +8,8 @@ import {
 } from 'lucide-react';
 import { Layout } from '../components/Layout/Layout';
 import { StatCard } from '../components/Common/StatCard';
-import { mockBatches, mockTasks, mockAnnotations, mockUsers } from '../data/mockData';
-import { getStatusText, getStatusColor } from '../utils/helpers';
 import { useStore } from '../store';
+import { getStatusText, getStatusColor } from '../utils/helpers';
 
 interface DashboardProps {
   onNavigate: (path: string) => void;
@@ -18,20 +17,20 @@ interface DashboardProps {
 }
 
 export const Dashboard = ({ onNavigate, currentPath }: DashboardProps) => {
-  const { user } = useStore();
+  const { batches, tasks, annotations, users, user } = useStore();
   
-  const totalBatches = mockBatches.length;
-  const totalImages = mockBatches.reduce((sum, b) => sum + b.imageCount, 0);
-  const totalTasks = mockTasks.length;
-  const completedTasks = mockTasks.filter(t => t.status === 'completed').length;
-  const inProgressTasks = mockTasks.filter(t => t.status === 'in_progress').length;
-  const pendingTasks = mockTasks.filter(t => t.status === 'pending').length;
-  const reviewingTasks = mockTasks.filter(t => t.status === 'reviewing').length;
-  const totalAnnotations = mockAnnotations.length;
-  const totalUsers = mockUsers.length;
+  const totalBatches = batches.length;
+  const totalImages = batches.reduce((sum, b) => sum + b.imageCount, 0);
+  const totalTasks = tasks.length;
+  const completedTasks = tasks.filter(t => t.status === 'completed').length;
+  const inProgressTasks = tasks.filter(t => t.status === 'in_progress').length;
+  const pendingTasks = tasks.filter(t => t.status === 'pending').length;
+  const reviewingTasks = tasks.filter(t => t.status === 'reviewing').length;
+  const totalAnnotations = annotations.length;
+  const totalUsers = users.length;
   
   const userTasks = user 
-    ? mockTasks.filter(t => t.assigneeId === user.id) 
+    ? tasks.filter(t => t.assigneeId === user.id) 
     : [];
   const userCompleted = userTasks.filter(t => t.status === 'completed').length;
   const userProgress = userTasks.length > 0 ? Math.round((userCompleted / userTasks.length) * 100) : 0;
@@ -165,9 +164,9 @@ export const Dashboard = ({ onNavigate, currentPath }: DashboardProps) => {
             </button>
           </div>
           <div className="space-y-3">
-            {mockTasks.slice(0, 5).map((task) => {
-              const batch = mockBatches.find(b => b.id === task.batchId);
-              const assignee = mockUsers.find(u => u.id === task.assigneeId);
+            {tasks.slice(0, 5).map((task) => {
+              const batch = batches.find(b => b.id === task.batchId);
+              const assignee = users.find(u => u.id === task.assigneeId);
               return (
                 <div 
                   key={task.id}
@@ -198,7 +197,7 @@ export const Dashboard = ({ onNavigate, currentPath }: DashboardProps) => {
             </button>
           </div>
           <div className="space-y-3">
-            {mockBatches.slice(0, 5).map((batch) => (
+            {batches.slice(0, 5).map((batch) => (
               <div 
                 key={batch.id}
                 className="flex items-center justify-between p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors cursor-pointer"

@@ -14,7 +14,6 @@ import {
 import { Layout } from '../components/Layout/Layout';
 import { Button } from '../components/Common/Button';
 import { Modal } from '../components/Common/Modal';
-import { mockImages, mockCategories, mockAnnotations } from '../data/mockData';
 import { useStore } from '../store';
 import { Box, Category } from '../types';
 import { generateId } from '../utils/helpers';
@@ -25,7 +24,23 @@ interface AnnotationWorkbenchProps {
 }
 
 export const AnnotationWorkbench = ({ onNavigate, currentPath }: AnnotationWorkbenchProps) => {
-  const { draftBoxes, setDraftBoxes, addDraftBox, updateDraftBox, removeDraftBox, clearDraft } = useStore();
+  const { 
+    draftBoxes, 
+    setDraftBoxes, 
+    addDraftBox, 
+    updateDraftBox, 
+    removeDraftBox, 
+    clearDraft,
+    annotations,
+    addAnnotation,
+    submitAnnotation,
+    categories,
+    tasks,
+    updateTask,
+    user,
+    images
+  } = useStore();
+  
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const [selectedBox, setSelectedBox] = useState<string | null>(null);
   const [selectedCategory, setSelectedCategory] = useState<Category | null>(null);
@@ -38,8 +53,18 @@ export const AnnotationWorkbench = ({ onNavigate, currentPath }: AnnotationWorkb
   const canvasRef = useRef<HTMLDivElement>(null);
   const imageRef = useRef<HTMLImageElement>(null);
 
-  const currentImage = mockImages[currentImageIndex];
+  const currentImage = images[currentImageIndex] || { id: 'temp', batchId: '', fileName: 'road.jpg', storagePath: '', width: 1920, height: 1080, createdAt: '' };
   const scale = 0.5;
+
+  const myTasks = user ? tasks.filter(t => t.assigneeId === user.id && t.status === 'pending') : [];
+  const currentTask = myTasks[0];
+  
+  useEffect(() => {
+    const savedBoxes = annotations.find(a => a.imageId === currentImage.id && a.status === 'draft');
+    if (savedBoxes && savedBoxes.boxes.length > 0) {
+      setDraftBoxes(savedBoxes.boxes);
+    }
+  }, [currentImage.id, annotations, setDraftBoxes]);
   
   const handleMouseDown = useCallback((e: React.MouseEvent) => {
     if (!canvasRef.current || !imageRef.current) return;
@@ -117,7 +142,7 @@ export const AnnotationWorkbench = ({ onNavigate, currentPath }: AnnotationWorkb
     setSelectedBox(boxId);
     const box = draftBoxes.find(b => b.id === boxId);
     if (box) {
-      const category = mockCategories.find(c => c.code === box.category);
+      const category = categories.find(c => c.code === box.category);
       setSelectedCategory(category || null);
       setProperties(box.properties);
     }
@@ -160,19 +185,55 @@ export const AnnotationWorkbench = ({ onNavigate, currentPath }: AnnotationWorkb
   };
 
   const handleSaveDraft = () => {
+    const existingAnnotation = annotations.find(a => a.imageId === currentImage.id);
+    if (existingAnnotation) {
+      addAnnotation({
+        ...existingAnnotation,
+        boxes: draftBoxes,
+        status: 'draft',
+      });
+    } else {
+      addAnnotation({
+        taskId: currentTask?.id || '',
+        imageId: currentImage.id,
+        boxes: draftBoxes,
+        status: 'draft',
+      });
+    }
     alert('草稿已保存');
   };
 
   const handleSubmit = () => {
+    const existingAnnotation = annotations.find(a => a.imageId === currentImage.id);
+    
+    if (existingAnnotation) {
+      addAnnotation({
+        ...existingAnnotation,
+        boxes: draftBoxes,
+        status: 'submitted',
+      });
+    } else {
+      addAnnotation({
+        taskId: currentTask?.id || '',
+        imageId: currentImage.id,
+        boxes: draftBoxes,
+        status: 'submitted',
+      });
+    }
+
+    if (currentTask && currentTask.status === 'pending') {
+      updateTask(currentTask.id, { status: 'in_progress' });
+    }
+
     setShowSubmitModal(false);
     clearDraft();
     setSelectedBox(null);
     setSelectedCategory(null);
     setProperties({});
-    alert('标注已提交审核');
   };
 
   const handlePrevImage = () => {
+    handleSaveDraft();
     if (currentImageIndex > 0) {
       setCurrentImageIndex(currentImageIndex - 1);
       clearDraft();
@@ -183,7 +244,8 @@ export const AnnotationWorkbench = ({ onNavigate, currentPath }: AnnotationWorkb
   };
 
   const handleNextImage = () => {
-    if (currentImageIndex < mockImages.length - 1) {
+    handleSaveDraft();
+    if (currentImageIndex < (images.length || 5) - 1) {
       setCurrentImageIndex(currentImageIndex + 1);
       clearDraft();
       setSelectedBox(null);
@@ -194,7 +256,7 @@ export const AnnotationWorkbench = ({ onNavigate, currentPath }: AnnotationWorkb
 
   const colors = ['#ef4444', '#f59e0b', '#10b981', '#3b82f6', '#8b5cf6', '#ec4899'];
   const getCategoryColor = (categoryCode: string) => {
-    const index = mockCategories.findIndex(c => c.code === categoryCode);
+    const index = categories.findIndex(c => c.code === categoryCode);
     return colors[index % colors.length];
   };
 
@@ -219,12 +281,12 @@ export const AnnotationWorkbench = ({ onNavigate, currentPath }: AnnotationWorkb
                   上一张
                 </Button>
                 <span className="text-sm text-gray-600">
-                  {currentImageIndex + 1} / {mockImages.length}
+                  {currentImageIndex + 1} / {images.length || 5}
                 </span>
                 <Button 
                   variant="secondary" 
                   onClick={handleNextImage}
-                  disabled={currentImageIndex === mockImages.length - 1}
+                  disabled={currentImageIndex === (images.length || 5) - 1}
                 >
                   下一张
                   <ChevronRight className="w-4 h-4" />
@@ -416,7 +478,7 @@ export const AnnotationWorkbench = ({ onNavigate, currentPath }: AnnotationWorkb
         title="选择标注类别"
       >
         <div className="grid grid-cols-2 gap-3">
-          {mockCategories.map((category) => (
+          {categories.map((category) => (
             <button
               key={category.id}
               onClick={() => handleCategorySelect(category)}
